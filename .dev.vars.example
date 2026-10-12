@@ -1,0 +1,5 @@
+# Секреты для локального запуска (npx wrangler dev). На сайте они задаются в панели Cloudflare: Settings -> Variables and Secrets.
+# Приватный ключ ГОРЯЧЕГО кошелька сервера в base58 (отдельный новый кошелёк в Phantom). Пусто = режим симуляции.
+OWNER_SECRET_KEY=
+# RPC с ключом (helius.dev, бесплатно): https://mainnet.helius-rpc.com/?api-key=XXXX
+RPC_URL=https://api.mainnet-beta.solana.com

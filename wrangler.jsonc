@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clout-cafe",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "durable_objects": { "bindings": [{ "name": "CAFE", "class_name": "Cafe" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Cafe"] }],
+  "triggers": { "crons": ["*/10 * * * *"] },
+  "observability": { "enabled": true },
+  "vars": {
+    "LAUNCH_FEE_SOL": "0.05",
+    "VIP_FEE_SOL": "0.05",
+    "DEV_BUY_SOL": "0",
+    "PAYOUT_WALLET": "6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw",
+    "RESERVE_SOL": "0.08",
+    "LAUNCHES_PER_HOUR_PER_IP": "2",
+    "PHOTO_MAX_KB": "220"
+  }
+}
