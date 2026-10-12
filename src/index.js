@@ -42,7 +42,7 @@ export class Cafe extends DurableObject {
     this.OWNER = env.OWNER_SECRET_KEY ? Keypair.fromSecretKey(bs58.decode(env.OWNER_SECRET_KEY.trim())) : null;
     this.OWNER_PUBKEY = this.OWNER ? this.OWNER.publicKey.toBase58() : '';
     this.RPC = env.RPC_URL || 'https://api.mainnet-beta.solana.com';
-    this.LAUNCH_FEE_SOL = +(env.LAUNCH_FEE_SOL || 0); this.VIP_FEE_SOL = +(env.VIP_FEE_SOL || 0.05); this.DEV_BUY_SOL = +(env.DEV_BUY_SOL || 0);
+    this.LAUNCH_FEE_SOL = +(env.LAUNCH_FEE_SOL || 0); this.VIP_FEE_SOL = +(env.VIP_FEE_SOL ?? 0.5); this.DEV_BUY_SOL = +(env.DEV_BUY_SOL || 0);
     this.PAYOUT_WALLET = (env.PAYOUT_WALLET || '6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw').trim(); this.RESERVE_SOL = +(env.RESERVE_SOL || 0.08);
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
@@ -140,7 +140,8 @@ export class Cafe extends DurableObject {
         const p = await this.body(req, 2048);
         let wallet = this.walletOfToken(p.token); if (!wallet) { try { wallet = new PublicKey(String(p.wallet)).toBase58(); } catch (e) { return json(400, { error: 'bad wallet' }); } }
         if (!this.FEE_RECEIVER) return json(400, { error: 'no fee wallet configured' });
-        if (!(await this.verifyPayment(p.sig, this.VIP_FEE_SOL, wallet))) return json(402, { error: 'VIP payment not found' });
+        if (this.vips[wallet]) return json(200, { ok: true, already: true });
+        if (!(await this.verifyPayment(p.sig, this.VIP_FEE_SOL, wallet))) return json(402, { error: 'VIP payment not found yet, try again in a minute' });
         this.vips[wallet] = Date.now(); await this.ctx.storage.put('vips', this.vips);
         for (const [ws, me] of this.players) if (me.wallet === wallet) { me.vip = true; ws.serializeAttachment(me); this.broadcast({ t: 'ps', list: [{ id: me.id, vip: true }] }); }
         this.log('[vip]', wallet); return json(200, { ok: true });
@@ -308,13 +309,37 @@ export class Cafe extends DurableObject {
       this.log('[claim] creator fees claimed:', sig);
     } catch (e) { this.log('[claim] error:', e.message); }
   }
+  // JSON-RPC with fallbacks: the configured RPC first, then two public ones, so a payment is never lost to one slow endpoint
+  async rpcJson(method, params) {
+    const urls = [...new Set([this.RPC, 'https://solana-rpc.publicnode.com', 'https://api.mainnet-beta.solana.com'])];
+    let last = null;
+    for (const u of urls) {
+      try {
+        const r = await fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+        if (!r.ok) { last = new Error('rpc ' + r.status); continue; }
+        const j = await r.json(); if (j.error) { last = new Error(j.error.message || 'rpc error'); continue; }
+        return j.result;
+      } catch (e) { last = e; }
+    }
+    throw last || new Error('rpc failed');
+  }
+  // checks on chain that `sig` moved at least `amountSol` from `from` to the fee wallet; waits up to ~45 s for the transaction to land
   async verifyPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) {
     if (!amountSol) return true;
-    if (!sig || this.usedSigs.has(sig)) return false;
-    const tx = await this.conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
-    if (!tx || tx.meta?.err) return false;
-    const ok = tx.transaction.message.instructions.some(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
-    if (ok) this.usedSigs.add(sig); return ok;
+    sig = String(sig || ''); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return false;
+    if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return false;
+    for (let i = 0; i < 15; i++) {
+      let tx = null; try { tx = await this.rpcJson('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]); } catch (e) { this.log('[pay] rpc', e.message); }
+      if (tx) {
+        if (tx.meta?.err) return false;
+        const ixs = tx.transaction?.message?.instructions || [];
+        const ok = ixs.some(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
+        if (ok) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, Date.now()); }
+        return ok;
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    return false;
   }
   async sweepToPayout() {
     if (!this.OWNER || !this.PAYOUT_WALLET || this.PAYOUT_WALLET === this.OWNER_PUBKEY) return;

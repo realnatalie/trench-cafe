@@ -11,7 +11,7 @@
   "observability": { "enabled": true },
   "vars": {
     "LAUNCH_FEE_SOL": "0.05",
-    "VIP_FEE_SOL": "0.05",
+    "VIP_FEE_SOL": "0.5",
     "DEV_BUY_SOL": "0",
     "PAYOUT_WALLET": "6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw",
     "RESERVE_SOL": "0.08",
