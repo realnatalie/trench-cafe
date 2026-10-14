@@ -1,4 +1,4 @@
-// Clout Cafe on Cloudflare: one Worker serves the page (static asset) and forwards everything else to a single
+// Trench Cafe on Cloudflare: one Worker serves the page (static asset) and forwards everything else to a single
 // Durable Object "Cafe" that holds the room: who is online, chat, agent launches, pump.fun token creation,
 // live trades, prices, wallet sign-in, profiles, photos and VIP passes. Settings: wrangler.jsonc (vars) + secrets.
 import { DurableObject } from 'cloudflare:workers';
@@ -18,7 +18,7 @@ const randHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
 async function sha1hex(buf) { return hex(await crypto.subtle.digest('SHA-1', buf)); }
 function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
 function bytesToB64(bytes) { let s = ''; const u = new Uint8Array(bytes); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
-const loginMsg = (wallet, nonce) => `Clout Cafe sign-in\nwallet: ${wallet}\nnonce: ${nonce}`;
+const loginMsg = (wallet, nonce) => `Trench Cafe sign-in\nwallet: ${wallet}\nnonce: ${nonce}`;
 
 /* ---------- the Worker: page from assets, everything else to the room ---------- */
 export default {
