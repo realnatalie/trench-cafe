@@ -5,6 +5,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { Keypair, Connection, VersionedTransaction, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
+import { installExtras } from './extras.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -49,6 +50,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
+    this.extrasInit(env); this.casinoCheck();
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
     this.players = new Map(); this.nextId = 1; this.NONCES = new Map(); this.usedSigs = new Set(); this.hitLog = new Map(); this.launchLog = new Map();
     this.PX = {}; this.OHLC = {}; this.SOL_USD = 0; this.ohlcIdx = 0; this.TRADES = {}; this.txQueue = []; this.ppWs = null; this.ppSubscribed = ''; this.psTick = 0; this.timer = null; this.lastPx = 0;
@@ -56,7 +58,7 @@ export class Cafe extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const st = this.ctx.storage;
       const ag = await st.list({ prefix: 'a:' }); this.agents = [...ag.values()].sort((a, b) => a.at - b.at);
-      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {};
+      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {}; await this.extrasLoad();
       const now = Date.now(); let pruned = false; for (const k in this.sessions) if (now - this.sessions[k].at > 90 * 86400e3) { delete this.sessions[k]; pruned = true; } if (pruned) await st.put('sessions', this.sessions);
     });
     if (this.players.size) this.startLoop();
@@ -75,7 +77,7 @@ export class Cafe extends DurableObject {
         const id = 'p' + (this.nextId++); const me = { id, c: 'degen', n: 'player', x: 0, z: 20, ry: 0, st: 'idle', ip };
         this.players.set(server, me); server.serializeAttachment(me);
         if (this.LIVE && !this.recoverStarted) { this.recoverStarted = true; this.ctx.waitUntil(this.finishPending().then(() => this.recoverOrphans())); }
-        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, boosts: this.liveBoosts(), cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, boostFee: this.BOOST_FEE_SOL, boostMin: this.BOOST_MIN, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
+        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, boosts: this.liveBoosts(), cfg: { ...this.extrasCfg(), live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, boostFee: this.BOOST_FEE_SOL, boostMin: this.BOOST_MIN, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
         this.broadcast({ t: 'online', online: this.players.size }, server);
         this.startLoop();
         return new Response(null, { status: 101, webSocket: client });
@@ -200,6 +202,7 @@ export class Cafe extends DurableObject {
         try { const done = await this.finishLaunch(key, rec); return json(200, { ok: true, mint: done.mint, sig: done.sig }); }
         catch (e) { this.log('[launch] not finished yet', symbol, e.message); return json(503, { error: 'pump.fun has not confirmed the coin yet. Press Launch again: you will not be charged twice. (' + String(e.message).slice(0, 120) + ')', code: 'retry' }); }
       }
+      if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
       if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
     } catch (e) { this.log('[http] error', e.message); return json(500, { error: e.message }); }
@@ -227,7 +230,7 @@ export class Cafe extends DurableObject {
       me.c = String(m.c || 'degen').slice(0, 16); me.n = cleanNick(String(m.n || 'player').replace(/[<>&"']/g, '').slice(0, 16)) || 'player';
       me.look = me.c === 'custom' ? cleanLook(m.look) : undefined; me.photo = /^[a-f0-9]{8,40}$/.test(String(m.photo || '')) ? m.photo : undefined;
       me.em = /^[a-z]{3,10}$/.test(String(m.em || '')) && m.em !== 'auto' ? m.em : undefined;
-      me.wallet = this.walletOfToken(m.token) || undefined; me.vip = !!(me.wallet && this.vips[me.wallet]);
+      me.wallet = this.walletOfToken(m.token) || undefined; me.vip = !!(me.wallet && this.vips[me.wallet]); me.fl = this.ownedFlair(me.wallet, m.fl);
       if (typeof m.x === 'number') { me.x = m.x; me.z = m.z; }
       ws.serializeAttachment(me);
       this.broadcast({ t: 'ps', list: [this.pub(me)] }, ws);
@@ -468,3 +471,4 @@ export class Cafe extends DurableObject {
     } catch (e) { this.log('[sweep] error', e.message); }
   }
 }
+installExtras(Cafe);

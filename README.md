@@ -87,3 +87,16 @@
 - Сайт открылся, но «0 online» и игроки не видят друг друга - открой `https://твой-адрес/api/health`; если там ошибка, пришли мне текст.
 - `"live": false` после добавления ключа - сделай `npx wrangler deploy` ещё раз.
 - Ключ утёк - переведи деньги на другой кошелёк, сделай новый, `npx wrangler secret put OWNER_SECRET_KEY` заново.
+
+## Магазин и оплата токеном
+
+- Цены вещей и VIP заданы в SOL (VIP: `VIP_FEE_SOL`, вещи: файл `src/extras.js`, объект `SHOP`).
+- Чтобы принимать оплату токеном проекта, впиши адрес токена (mint) в переменную `PAY_TOKEN_MINT` (Cloudflare → Workers → clout-cafe → Settings → Variables and Secrets, или в `wrangler.jsonc`).
+- Сумма в токенах считается в момент покупки по живой цене DexScreener: цена в SOL × курс SOL ÷ курс токена. Токены приходят на `PAYOUT_WALLET`.
+
+## Тестовое казино (только devnet)
+
+- Работает только в тестовой сети Solana: сервер проверяет сеть и в основной сети казино не включается.
+- Нужен отдельный тестовый кошелёк казино. В Phantom: создай новый аккаунт, Settings → Developer Settings → Testnet Mode → Solana Devnet. Пополни его бесплатно на faucet.solana.com.
+- Экспортируй приватный ключ этого тестового аккаунта и добавь его в Cloudflare как **Secret** с именем `CASINO_HOUSE_SECRET` (Settings → Variables and Secrets → Add → тип Secret). Никогда не используй для этого основной кошелёк.
+- Сеть задаёт `CASINO_RPC` (по умолчанию `https://api.devnet.solana.com`).

@@ -14,6 +14,8 @@
     "VIP_FEE_SOL": "0.5",
     "BOOST_FEE_SOL": "0.1",
     "BOOST_MINUTES": "60",
+    "PAY_TOKEN_MINT": "",
+    "CASINO_RPC": "https://api.devnet.solana.com",
     "DEV_BUY_SOL": "0",
     "PAYOUT_WALLET": "6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw",
     "RESERVE_SOL": "0.08",
