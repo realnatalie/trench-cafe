@@ -7,6 +7,7 @@ import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
+const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
 const LOOK_KEYS = ['base', 'emote', 'photo', 'body', 'build', 'skin', 'hair', 'hairCol', 'eyes', 'acc', 'top', 'topCol', 'pants', 'shoes', 'accent'];
 const RPC_ALLOWED = new Set(['getBalance', 'getLatestBlockhash', 'getSignatureStatuses', 'getTokenAccountsByOwner', 'getParsedTokenAccountsByOwner', 'getTokenAccountBalance', 'sendTransaction', 'simulateTransaction', 'getAccountInfo', 'getTransaction', 'getMinimumBalanceForRentExemption', 'getRecentPrioritizationFees', 'getBlockHeight', 'getSlot', 'getMultipleAccounts']);
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'POST,GET,OPTIONS' };
@@ -72,6 +73,7 @@ export class Cafe extends DurableObject {
         this.ctx.acceptWebSocket(server);
         const id = 'p' + (this.nextId++); const me = { id, c: 'degen', n: 'player', x: 0, z: 20, ry: 0, st: 'idle', ip };
         this.players.set(server, me); server.serializeAttachment(me);
+        if (this.LIVE && !this.recoverStarted) { this.recoverStarted = true; this.ctx.waitUntil(this.finishPending().then(() => this.recoverOrphans())); }
         server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
         this.broadcast({ t: 'online', online: this.players.size }, server);
         this.startLoop();
@@ -150,24 +152,30 @@ export class Cafe extends DurableObject {
         const p = await this.body(req, 4 * 1024 * 1024);
         const symbol = String(p.symbol || p.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
         if (!symbol) return json(400, { error: 'bad name' });
-        if (this.agents.some(a => a.mint && a.sym === symbol)) return json(400, { error: 'ticker already exists' });
-        if (!this.LIVE) return json(200, { ok: true, mint: null, sim: true });   // test mode: the coin stays on the player's screen only
-        if (!this.allowLaunch(ip)) return json(429, { error: 'too many launches from this address, try later' });
-        let mint = null, sig = null;
-        if (this.LIVE) {
-          if (this.LAUNCH_FEE_SOL && !(await this.verifyPayment(p.paymentSig))) return json(402, { error: 'launch fee payment not found' });
-          ({ mint, sig } = await this.createToken({ name: String(p.name || symbol).slice(0, 32), symbol, description: String(p.description || '').slice(0, 300), imageDataUrl: p.image, twitter: p.twitter, telegram: p.telegram, website: p.website }));
+        if (!this.LIVE) { if (this.agents.some(a => a.mint && a.sym === symbol)) return json(400, { error: 'ticker already exists' }); return json(200, { ok: true, mint: null, sim: true }); }   // test mode: the coin stays on the player's screen only
+        // one paid fee = one coin. The same payment can be sent again any number of times: it never creates a second coin and never needs a second payment.
+        const paySig = String(p.paymentSig || '').trim();
+        if (this.LAUNCH_FEE_SOL && !/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(paySig)) return json(402, { error: 'launch fee payment missing', code: 'pay_missing' });
+        let key = paySig ? 'launch:' + paySig : null, rec = key ? await this.ctx.storage.get(key) : null;
+        if (rec && rec.done) return json(200, { ok: true, mint: rec.mint, sig: rec.sig, again: true });
+        if (!rec) {
+          if (this.agents.some(a => a.mint && a.sym === symbol)) return json(400, { error: 'ticker already exists', code: 'ticker' });
+          if (!this.allowLaunch(ip)) return json(429, { error: 'too many launches from this address, try later' });
+          if (this.LAUNCH_FEE_SOL) {
+            const pv = await this.checkPayment(paySig);
+            if (pv !== 'ok') return json(402, pv === 'used' ? { error: 'this payment was already used', code: 'pay_used' } : pv === 'bad' ? { error: 'the fee payment failed on chain', code: 'pay_bad' } : { error: 'the fee payment is not visible on Solana yet. Press Launch again in a minute: you will not be charged twice.', code: 'pay_wait' });
+          }
+          const mint = Keypair.generate();
+          rec = { mint: mint.publicKey.toBase58(), mintSecret: bs58.encode(mint.secretKey), at: Date.now(), done: false, tries: 0, ip,
+            meta: { name: String(p.name || symbol).slice(0, 32), symbol, description: String(p.description || '').slice(0, 300), twitter: String(p.twitter || '').slice(0, 80), telegram: String(p.telegram || '').slice(0, 80), website: String(p.website || '').slice(0, 120) },
+            body: String(p.body || 'degen').slice(0, 16), image: typeof p.image === 'string' && p.image.length < 400000 ? p.image : null, by: String(p.by || '').slice(0, 24) };
+          if (!key) key = 'launch:free:' + rec.mint;
+          await this.ctx.storage.put(key, rec);
         }
-        const agent = { sym: symbol, name: String(p.name || symbol).slice(0, 32), socials: { x: String(p.twitter || '').slice(0, 80), tg: String(p.telegram || '').slice(0, 80), web: String(p.website || '').slice(0, 120) }, body: String(p.body || 'degen').slice(0, 16), image: typeof p.image === 'string' && p.image.length < 400000 ? p.image : null, desc: String(p.description || '').slice(0, 300), by: String(p.by || '').slice(0, 24), mint, sig, at: Date.now() };
-        if (!agent.mint) return json(500, { error: 'token was not created' });
-        this.agents.push(agent); await this.ctx.storage.put('a:' + String(agent.at).padStart(14, '0'), agent);
-        if (this.agents.length > 500) { const old = this.agents.shift(); await this.ctx.storage.delete('a:' + String(old.at).padStart(14, '0')); }
-        this.ctx.waitUntil(this.ppConnect()); this.ctx.waitUntil(new Promise(r => setTimeout(r, 15000)).then(() => this.pollPrices()));
-        this.broadcast({ t: 'launch', agent });
-        this.log('[launch]', symbol, mint || '(sim)', 'by', ip);
-        return json(200, { ok: true, mint, sig, sim: !this.LIVE });
+        try { const done = await this.finishLaunch(key, rec); return json(200, { ok: true, mint: done.mint, sig: done.sig }); }
+        catch (e) { this.log('[launch] not finished yet', symbol, e.message); return json(503, { error: 'pump.fun has not confirmed the coin yet. Press Launch again: you will not be charged twice. (' + String(e.message).slice(0, 120) + ')', code: 'retry' }); }
       }
-      if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
+      if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
     } catch (e) { this.log('[http] error', e.message); return json(500, { error: e.message }); }
   }
@@ -286,19 +294,99 @@ export class Cafe extends DurableObject {
     if (!r.ok) throw new Error('metadata upload failed: ' + r.status);
     const j = await r.json(); return j.metadataUri;
   }
-  async signAndSend(txBytes, signers) {
+  // signs, sends and waits for confirmation over plain HTTP polling (no websockets, no 30 s blockhash timer that gives up while the transaction still lands)
+  async signAndSend(txBytes, signers, waitMs = 45000) {
     const tx = VersionedTransaction.deserialize(new Uint8Array(txBytes)); tx.sign(signers);
-    const sig = await this.conn.sendTransaction(tx, { skipPreflight: false, maxRetries: 3 });
-    await this.conn.confirmTransaction(sig, 'confirmed'); return sig;
+    const raw = bytesToB64(tx.serialize()), sig = bs58.encode(tx.signatures[0]);
+    await this.rpcJson('sendTransaction', [raw, { encoding: 'base64', skipPreflight: false, maxRetries: 5, preflightCommitment: 'confirmed' }]);
+    const t0 = Date.now(); let n = 0;
+    while (Date.now() - t0 < waitMs) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const st = (await this.rpcJson('getSignatureStatuses', [[sig], { searchTransactionHistory: true }]))?.value?.[0];
+        if (st && st.err) { const e = new Error('transaction failed on chain'); e.sig = sig; e.failed = true; throw e; }
+        if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return sig;
+      } catch (e) { if (e.failed) throw e; }
+      if (++n % 4 === 0) { try { await this.rpcJson('sendTransaction', [raw, { encoding: 'base64', skipPreflight: true, maxRetries: 0 }]); } catch (e) { } }   // re-broadcast while waiting
+    }
+    const e = new Error('not confirmed in time'); e.sig = sig; throw e;
   }
-  async createToken({ name, symbol, description, imageDataUrl, twitter, telegram, website }) {
-    const uri = await this.uploadMetadata({ name, symbol, description, imageDataUrl, twitter, telegram, website });
-    const mint = Keypair.generate();
-    const body = { publicKey: this.OWNER.publicKey.toBase58(), action: 'create', tokenMetadata: { name, symbol, uri }, mint: mint.publicKey.toBase58(), denominatedInSol: 'true', amount: this.DEV_BUY_SOL, slippage: 10, priorityFee: 0.0005, pool: 'pump' };
+  async mintExists(mint) { try { const r = await this.rpcJson('getAccountInfo', [mint, { encoding: 'base64', commitment: 'confirmed' }]); return !!(r && r.value); } catch (e) { return false; } }
+  async createToken(meta, mintKp, rec) {
+    if (!rec.uri) { rec.uri = await this.uploadMetadata({ ...meta, imageDataUrl: rec.image }); }
+    const body = { publicKey: this.OWNER.publicKey.toBase58(), action: 'create', tokenMetadata: { name: meta.name, symbol: meta.symbol, uri: rec.uri }, mint: mintKp.publicKey.toBase58(), denominatedInSol: 'true', amount: this.DEV_BUY_SOL, slippage: 10, priorityFee: 0.0005, pool: 'pump' };
     const r = await fetch(PUMPPORTAL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) throw new Error('pumpportal create failed: ' + r.status + ' ' + (await r.text()).slice(0, 200));
-    const sig = await this.signAndSend(await r.arrayBuffer(), [mint, this.OWNER]);
-    return { mint: mint.publicKey.toBase58(), sig };
+    const sig = await this.signAndSend(await r.arrayBuffer(), [mintKp, this.OWNER]);
+    return { mint: mintKp.publicKey.toBase58(), sig };
+  }
+  // finishes one paid launch: if the coin is already on chain it is just recorded, otherwise it is created with the same mint (so it can never be created twice)
+  async finishLaunch(key, rec) {
+    if (rec.done) return rec;
+    if (this.launchBusy?.has(key)) throw new Error('still creating');
+    (this.launchBusy ||= new Set()).add(key);
+    try {
+      if (!(await this.mintExists(rec.mint))) {
+        const kp = Keypair.fromSecretKey(bs58.decode(rec.mintSecret));
+        try { const r = await this.createToken(rec.meta, kp, rec); rec.sig = r.sig; }
+        catch (e) {
+          if (e.sig) rec.sig = e.sig;
+          await new Promise(r => setTimeout(r, 1500));
+          if (!(await this.mintExists(rec.mint))) { rec.tries = (rec.tries || 0) + 1; rec.lastErr = String(e.message).slice(0, 200); await this.ctx.storage.put(key, rec); throw e; }
+        }
+      }
+      return await this.commitLaunch(key, rec);
+    } finally { this.launchBusy.delete(key); }
+  }
+  async commitLaunch(key, rec) {
+    if (!this.agents.some(a => a.mint === rec.mint)) {
+      const m = rec.meta || {};
+      const agent = { sym: m.symbol, name: m.name || m.symbol, socials: { x: m.twitter || '', tg: m.telegram || '', web: m.website || '' }, body: rec.body || 'degen', image: rec.image || null, desc: m.description || '', by: rec.by || '', mint: rec.mint, sig: rec.sig || null, at: Date.now() };
+      this.agents.push(agent); await this.ctx.storage.put('a:' + String(agent.at).padStart(14, '0'), agent);
+      if (this.agents.length > 500) { const old = this.agents.shift(); await this.ctx.storage.delete('a:' + String(old.at).padStart(14, '0')); }
+      this.ctx.waitUntil(this.ppConnect()); this.ctx.waitUntil(new Promise(r => setTimeout(r, 15000)).then(() => this.pollPrices()));
+      this.broadcast({ t: 'launch', agent });
+      this.log('[launch]', agent.sym, agent.mint);
+    }
+    rec.done = true; delete rec.mintSecret; if (key) await this.ctx.storage.put(key, rec);
+    return rec;
+  }
+  // launches that were paid but not confirmed while the player waited: finished in the background (cron)
+  async finishPending() {
+    if (!this.OWNER) return;
+    const all = await this.ctx.storage.list({ prefix: 'launch:' });
+    for (const [key, rec] of all) {
+      if (!rec || rec.done) continue;
+      if (Date.now() - rec.at > 3 * 86400e3 || (rec.tries || 0) > 8) continue;
+      try { await this.finishLaunch(key, rec); } catch (e) { this.log('[pending]', key.slice(0, 20), e.message); }
+    }
+  }
+  // any coin the cafe wallet created that is missing from the cafe (for example after an old error) is added back
+  async recoverOrphans() {
+    if (!this.OWNER) return;
+    try {
+      const PUMP = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
+      const sigs = await this.rpcJson('getSignaturesForAddress', [this.OWNER_PUBKEY, { limit: 40, commitment: 'confirmed' }]) || [];
+      for (const s of sigs) {
+        if (s.err || (s.blockTime && s.blockTime * 1000 < RECOVER_SINCE) || await this.ctx.storage.get('scan:' + s.signature)) continue;
+        let tx = null; try { tx = await this.rpcJson('getTransaction', [s.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]); } catch (e) { continue; }
+        if (!tx) continue;
+        await this.ctx.storage.put('scan:' + s.signature, 1);
+        const logs = (tx.meta?.logMessages || []).join('\n'); if (!/Instruction: Create/.test(logs)) continue;
+        const keys = tx.transaction?.message?.accountKeys || [];
+        const mintKey = keys.find(k => k.signer && k.pubkey !== this.OWNER_PUBKEY); if (!mintKey) continue;
+        const mint = mintKey.pubkey; if (this.agents.some(a => a.mint === mint)) continue;
+        const ix = (tx.transaction?.message?.instructions || []).find(i => i.programId === PUMP && i.data); if (!ix) continue;
+        let name = '', symbol = '', uri = '';
+        try { const d = bs58.decode(ix.data); let o = 8; const str = () => { const n = d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24); o += 4; const v = new TextDecoder().decode(d.slice(o, o + n)); o += n; return v; }; name = str(); symbol = str(); uri = str(); } catch (e) { continue; }
+        if (!symbol) continue;
+        let md = {}; if (/^https?:\/\//.test(uri)) { try { const r = await fetch(uri, { signal: AbortSignal.timeout(8000) }); if (r.ok) md = await r.json(); } catch (e) { } }
+        const rec = { mint, sig: s.signature, at: (s.blockTime || 0) * 1000 || Date.now(), body: 'degen', image: typeof md.image === 'string' ? md.image : null, by: '',
+          meta: { name: String(name).slice(0, 32), symbol: String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'COIN', description: String(md.description || '').slice(0, 300), twitter: String(md.twitter || '').slice(0, 80), telegram: String(md.telegram || '').slice(0, 80), website: String(md.website || '').slice(0, 120) } };
+        await this.commitLaunch('launch:recovered:' + mint, rec);
+        this.log('[recover] added', rec.meta.symbol, mint);
+      }
+    } catch (e) { this.log('[recover] error', e.message); }
   }
   async claimCreatorFees() {
     if (!this.OWNER) return;
@@ -323,31 +411,33 @@ export class Cafe extends DurableObject {
     }
     throw last || new Error('rpc failed');
   }
-  // checks on chain that `sig` moved at least `amountSol` from `from` to the fee wallet; waits up to ~45 s for the transaction to land
-  async verifyPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) {
-    if (!amountSol) return true;
-    sig = String(sig || ''); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return false;
-    if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return false;
+  // checks on chain that `sig` moved at least `amountSol` from `from` to the fee wallet; waits up to ~45 s for the transaction to land.
+  // returns 'ok', 'used' (already spent on something), 'bad' (failed or wrong transfer) or 'wait' (not visible yet)
+  async checkPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) {
+    if (!amountSol) return 'ok';
+    sig = String(sig || ''); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return 'bad';
+    if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return 'used';
     for (let i = 0; i < 15; i++) {
       let tx = null; try { tx = await this.rpcJson('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]); } catch (e) { this.log('[pay] rpc', e.message); }
       if (tx) {
-        if (tx.meta?.err) return false;
+        if (tx.meta?.err) return 'bad';
         const ixs = tx.transaction?.message?.instructions || [];
         const ok = ixs.some(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
         if (ok) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, Date.now()); }
-        return ok;
+        return ok ? 'ok' : 'bad';
       }
       await new Promise(r => setTimeout(r, 3000));
     }
-    return false;
+    return 'wait';
   }
+  async verifyPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) { return (await this.checkPayment(sig, amountSol, from)) === 'ok'; }
   async sweepToPayout() {
     if (!this.OWNER || !this.PAYOUT_WALLET || this.PAYOUT_WALLET === this.OWNER_PUBKEY) return;
     try {
       const bal = await this.conn.getBalance(this.OWNER.publicKey); const send = bal - Math.round(this.RESERVE_SOL * 1e9) - 10000;
       if (send < 0.01 * 1e9) return;
       const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: this.OWNER.publicKey, toPubkey: new PublicKey(this.PAYOUT_WALLET), lamports: send }));
-      const sig = await this.conn.sendTransaction(tx, [this.OWNER]); await this.conn.confirmTransaction(sig, 'confirmed');
+      tx.feePayer = this.OWNER.publicKey; tx.recentBlockhash = (await this.rpcJson('getLatestBlockhash', [{ commitment: 'confirmed' }])).value.blockhash; tx.sign(this.OWNER); const sig = bs58.encode(tx.signature); await this.rpcJson('sendTransaction', [bytesToB64(tx.serialize()), { encoding: 'base64' }]);
       this.log('[sweep]', (send / 1e9).toFixed(4), 'SOL →', this.PAYOUT_WALLET, sig);
     } catch (e) { this.log('[sweep] error', e.message); }
   }
