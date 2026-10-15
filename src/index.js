@@ -74,7 +74,7 @@ export class Cafe extends DurableObject {
         const id = 'p' + (this.nextId++); const me = { id, c: 'degen', n: 'player', x: 0, z: 20, ry: 0, st: 'idle', ip };
         this.players.set(server, me); server.serializeAttachment(me);
         if (this.LIVE && !this.recoverStarted) { this.recoverStarted = true; this.ctx.waitUntil(this.finishPending().then(() => this.recoverOrphans())); }
-        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
+        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
         this.broadcast({ t: 'online', online: this.players.size }, server);
         this.startLoop();
         return new Response(null, { status: 101, webSocket: client });
@@ -148,6 +148,15 @@ export class Cafe extends DurableObject {
         for (const [ws, me] of this.players) if (me.wallet === wallet) { me.vip = true; ws.serializeAttachment(me); this.broadcast({ t: 'ps', list: [{ id: me.id, vip: true }] }); }
         this.log('[vip]', wallet); return json(200, { ok: true });
       }
+      if (url.pathname === '/api/launch-status') {   // lets a player who paid see for sure whether the coin exists
+        const sig = String(url.searchParams.get('sig') || '').trim(); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return json(400, { error: 'bad sig' });
+        const key = 'launch:' + sig, rec = await this.ctx.storage.get(key);
+        if (!rec) return json(200, { state: 'none' });
+        const agent = rec.mint ? this.agents.find(a => a.mint === rec.mint) : null;
+        if (rec.done) return json(200, { state: 'done', mint: rec.mint, agent: agent ? { sym: agent.sym, name: agent.name, body: agent.body, image: agent.image, mint: agent.mint, by: agent.by, desc: agent.desc, socials: agent.socials, wallet: agent.wallet || '', at: agent.at } : null });
+        if (!this.launchBusy?.has(key) && Date.now() - (rec.triedAt || 0) > 30000) { rec.triedAt = Date.now(); this.ctx.waitUntil(this.finishLaunch(key, rec).catch(() => { })); }
+        return json(200, { state: 'pending', sym: rec.meta?.symbol || '' });
+      }
       if (req.method === 'POST' && url.pathname === '/api/launch') {
         const p = await this.body(req, 4 * 1024 * 1024);
         const symbol = String(p.symbol || p.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
@@ -165,8 +174,8 @@ export class Cafe extends DurableObject {
             const pv = await this.checkPayment(paySig);
             if (pv !== 'ok') return json(402, pv === 'used' ? { error: 'this payment was already used', code: 'pay_used' } : pv === 'bad' ? { error: 'the fee payment failed on chain', code: 'pay_bad' } : { error: 'the fee payment is not visible on Solana yet. Press Launch again in a minute: you will not be charged twice.', code: 'pay_wait' });
           }
-          const mint = Keypair.generate();
-          rec = { mint: mint.publicKey.toBase58(), mintSecret: bs58.encode(mint.secretKey), at: Date.now(), done: false, tries: 0, ip,
+          const mint = Keypair.generate(), paidBy = paySig ? (await this.ctx.storage.get('sig:' + paySig))?.from || '' : '';
+          rec = { wallet: paidBy, mint: mint.publicKey.toBase58(), mintSecret: bs58.encode(mint.secretKey), at: Date.now(), done: false, tries: 0, ip,
             meta: { name: String(p.name || symbol).slice(0, 32), symbol, description: String(p.description || '').slice(0, 300), twitter: String(p.twitter || '').slice(0, 80), telegram: String(p.telegram || '').slice(0, 80), website: String(p.website || '').slice(0, 120) },
             body: String(p.body || 'degen').slice(0, 16), image: typeof p.image === 'string' && p.image.length < 400000 ? p.image : null, by: String(p.by || '').slice(0, 24) };
           if (!key) key = 'launch:free:' + rec.mint;
@@ -341,7 +350,7 @@ export class Cafe extends DurableObject {
   async commitLaunch(key, rec) {
     if (!this.agents.some(a => a.mint === rec.mint)) {
       const m = rec.meta || {};
-      const agent = { sym: m.symbol, name: m.name || m.symbol, socials: { x: m.twitter || '', tg: m.telegram || '', web: m.website || '' }, body: rec.body || 'degen', image: rec.image || null, desc: m.description || '', by: rec.by || '', mint: rec.mint, sig: rec.sig || null, at: Date.now() };
+      const agent = { sym: m.symbol, name: m.name || m.symbol, socials: { x: m.twitter || '', tg: m.telegram || '', web: m.website || '' }, body: rec.body || 'degen', image: rec.image || null, desc: m.description || '', by: rec.by || '', wallet: rec.wallet || '', mint: rec.mint, sig: rec.sig || null, at: Date.now() };
       this.agents.push(agent); await this.ctx.storage.put('a:' + String(agent.at).padStart(14, '0'), agent);
       if (this.agents.length > 500) { const old = this.agents.shift(); await this.ctx.storage.delete('a:' + String(old.at).padStart(14, '0')); }
       this.ctx.waitUntil(this.ppConnect()); this.ctx.waitUntil(new Promise(r => setTimeout(r, 15000)).then(() => this.pollPrices()));
@@ -422,9 +431,9 @@ export class Cafe extends DurableObject {
       if (tx) {
         if (tx.meta?.err) return 'bad';
         const ixs = tx.transaction?.message?.instructions || [];
-        const ok = ixs.some(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
-        if (ok) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, Date.now()); }
-        return ok ? 'ok' : 'bad';
+        const hit = ixs.find(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
+        if (hit) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, { at: Date.now(), from: hit.parsed.info.source }); }
+        return hit ? 'ok' : 'bad';
       }
       await new Promise(r => setTimeout(r, 3000));
     }
