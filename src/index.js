@@ -45,6 +45,7 @@ export class Cafe extends DurableObject {
     this.RPC = env.RPC_URL || 'https://api.mainnet-beta.solana.com';
     this.LAUNCH_FEE_SOL = +(env.LAUNCH_FEE_SOL || 0); this.VIP_FEE_SOL = +(env.VIP_FEE_SOL ?? 0.5); this.DEV_BUY_SOL = +(env.DEV_BUY_SOL || 0);
     this.PAYOUT_WALLET = (env.PAYOUT_WALLET || '6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw').trim(); this.RESERVE_SOL = +(env.RESERVE_SOL || 0.08);
+    this.BOOST_FEE_SOL = +(env.BOOST_FEE_SOL ?? 0.1); this.BOOST_MIN = +(env.BOOST_MINUTES || 60); this.boosts = {};
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
@@ -55,7 +56,7 @@ export class Cafe extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const st = this.ctx.storage;
       const ag = await st.list({ prefix: 'a:' }); this.agents = [...ag.values()].sort((a, b) => a.at - b.at);
-      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {};
+      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {};
       const now = Date.now(); let pruned = false; for (const k in this.sessions) if (now - this.sessions[k].at > 90 * 86400e3) { delete this.sessions[k]; pruned = true; } if (pruned) await st.put('sessions', this.sessions);
     });
     if (this.players.size) this.startLoop();
@@ -74,7 +75,7 @@ export class Cafe extends DurableObject {
         const id = 'p' + (this.nextId++); const me = { id, c: 'degen', n: 'player', x: 0, z: 20, ry: 0, st: 'idle', ip };
         this.players.set(server, me); server.serializeAttachment(me);
         if (this.LIVE && !this.recoverStarted) { this.recoverStarted = true; this.ctx.waitUntil(this.finishPending().then(() => this.recoverOrphans())); }
-        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
+        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, boosts: this.liveBoosts(), cfg: { live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, boostFee: this.BOOST_FEE_SOL, boostMin: this.BOOST_MIN, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
         this.broadcast({ t: 'online', online: this.players.size }, server);
         this.startLoop();
         return new Response(null, { status: 101, webSocket: client });
@@ -148,6 +149,21 @@ export class Cafe extends DurableObject {
         for (const [ws, me] of this.players) if (me.wallet === wallet) { me.vip = true; ws.serializeAttachment(me); this.broadcast({ t: 'ps', list: [{ id: me.id, vip: true }] }); }
         this.log('[vip]', wallet); return json(200, { ok: true });
       }
+      if (req.method === 'POST' && url.pathname === '/api/boost') {   // paid promotion: a coin goes on the big screen and the top of the feed
+        const p = await this.body(req, 2048);
+        const mint = String(p.mint || ''), sig = String(p.sig || '').trim();
+        if (!this.FEE_RECEIVER || !this.BOOST_FEE_SOL) return json(400, { error: 'boost is off' });
+        if (!this.agents.some(a => a.mint === mint)) return json(400, { error: 'unknown coin' });
+        const done = await this.ctx.storage.get('boostsig:' + sig);
+        if (done) return json(200, { ok: true, mint: done.mint, until: this.boosts[done.mint] || done.until, again: true });
+        const pv = await this.checkPayment(sig, this.BOOST_FEE_SOL);
+        if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'the payment is not visible on Solana yet, press again in a minute: you will not be charged twice' : 'boost payment not found', code: pv });
+        const until = Math.max(Date.now(), this.boosts[mint] || 0) + this.BOOST_MIN * 60e3;
+        this.boosts[mint] = until; for (const k in this.boosts) if (this.boosts[k] < Date.now()) delete this.boosts[k];
+        await this.ctx.storage.put('boosts', this.boosts); await this.ctx.storage.put('boostsig:' + sig, { mint, until });
+        this.broadcast({ t: 'boost', mint, until }); this.log('[boost]', mint, new Date(until).toISOString());
+        return json(200, { ok: true, mint, until });
+      }
       if (url.pathname === '/api/launch-status') {   // lets a player who paid see for sure whether the coin exists
         const sig = String(url.searchParams.get('sig') || '').trim(); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return json(400, { error: 'bad sig' });
         const key = 'launch:' + sig, rec = await this.ctx.storage.get(key);
@@ -190,6 +206,7 @@ export class Cafe extends DurableObject {
   }
   async text(req, limit) { const t = await req.text(); if (t.length > limit) throw new Error('body too large'); return t; }
   async body(req, limit) { return JSON.parse(await this.text(req, limit)); }
+  liveBoosts() { const now = Date.now(), o = {}; for (const k in this.boosts) if (this.boosts[k] > now) o[k] = this.boosts[k]; return o; }
   allowHits(key, n, windowMs) { const now = Date.now(); const arr = (this.hitLog.get(key) || []).filter(t => now - t < windowMs); if (arr.length >= n) return false; arr.push(now); this.hitLog.set(key, arr); if (this.hitLog.size > 5000) this.hitLog.clear(); return true; }
   allowLaunch(ip) { const now = Date.now(); const arr = (this.launchLog.get(ip) || []).filter(t => now - t < 3600e3); if (arr.length >= this.LAUNCHES_PER_HOUR_PER_IP) return false; arr.push(now); this.launchLog.set(ip, arr); return true; }
   walletOfToken(tok) { const s = tok && this.sessions[tok]; if (!s) return null; if (Date.now() - s.at > 90 * 86400e3) { delete this.sessions[tok]; return null; } return s.wallet; }
