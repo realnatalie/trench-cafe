@@ -8,8 +8,11 @@ const SIG_RE = /^[1-9A-HJ-NP-Za-km-z]{60,100}$/;
 
 /* prices are set in SOL; a payment in the project token is converted at the live market price when the quote is made */
 export const SHOP = {
-  laser: { sol: 0.05 }, chain: { sol: 0.08 }, crown: { sol: 0.12 }, wings: { sol: 0.15 }, aura: { sol: 0.1 }, pet: { sol: 0.06 }
+  laser: { sol: 0.05 }, chain: { sol: 0.08 }, crown: { sol: 0.12 }, wings: { sol: 0.15 }, aura: { sol: 0.1 }, pet: { sol: 0.06 },
+  jetpack: { sol: 0.1 }, horns: { sol: 0.07 }, halo: { sol: 0.07 }, shades: { sol: 0.04 }, bag: { sol: 0.09 }, flag: { sol: 0.06 },
+  profeed: { sol: 0.1, days: 30 }   // pro trade feed: 30 days
 };
+const FLAIR_IDS = Object.keys(SHOP).filter(k => k !== 'profeed');
 
 /* the casino runs ONLY on Solana test networks: devnet SOL has no value. On mainnet it refuses to start. */
 const TEST_GENESIS = { EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: 'devnet', '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet' };
@@ -27,12 +30,14 @@ export function installExtras(Cafe) {
       this.CASINO_OK = false; this.CASINO_NET = ''; this.HOUSE = null;
       if (this.CASINO_SECRET) { try { this.HOUSE = Keypair.fromSecretKey(bs58.decode(this.CASINO_SECRET)); } catch (e) { this.log('[casino] bad CASINO_HOUSE_SECRET'); } }
       this.tokInfo = null; this.tokPx = { usd: 0, at: 0 }; this.rounds = new Map();
+      this.VIP_DESK_SOL = +(env.VIP_DESK_SOL ?? 0.05); this.PLATE_SOL = +(env.PLATE_SOL ?? 0.03);
     },
-    async extrasLoad() { this.items = (await this.ctx.storage.get('items')) || {}; },
+    async extrasLoad() { this.items = (await this.ctx.storage.get('items')) || {}; this.subs = (await this.ctx.storage.get('subs')) || {}; },
+    proUntil(wallet) { const u = wallet && this.subs[wallet]; return u && u > Date.now() ? u : 0; },
     extrasCfg() {
-      return { shop: SHOP, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: this.CASINO_OK ? { net: this.CASINO_NET, house: this.HOUSE.publicKey.toBase58(), rpc: this.CASINO_RPC, min: MIN_BET, max: MAX_BET } : null };
+      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: this.CASINO_OK ? { net: this.CASINO_NET, house: this.HOUSE.publicKey.toBase58(), rpc: this.CASINO_RPC, min: MIN_BET, max: MAX_BET } : null };
     },
-    ownedFlair(wallet, list) { const own = new Set((wallet && this.items[wallet]) || []); return (Array.isArray(list) ? list : []).map(String).filter(x => SHOP[x] && own.has(x)).slice(0, 6); },
+    ownedFlair(wallet, list) { const own = new Set((wallet && this.items[wallet]) || []); return (Array.isArray(list) ? list : []).map(String).filter(x => FLAIR_IDS.includes(x) && own.has(x)).slice(0, 6); },
 
     /* ---------- token price + quotes ---------- */
     async tokenMeta() {
@@ -89,6 +94,7 @@ export function installExtras(Cafe) {
       return 'wait';
     },
     async grant(wallet, item) {
+      if (item === 'profeed') { this.subs[wallet] = Math.max(Date.now(), this.subs[wallet] || 0) + SHOP.profeed.days * 86400e3; await this.ctx.storage.put('subs', this.subs); return; }
       if (item === 'vip') { this.vips[wallet] = Date.now(); await this.ctx.storage.put('vips', this.vips); for (const [ws, me] of this.players) if (me.wallet === wallet) { me.vip = true; ws.serializeAttachment(me); this.broadcast({ t: 'ps', list: [{ id: me.id, vip: true }] }); } return; }
       const l = this.items[wallet] || (this.items[wallet] = []); if (!l.includes(item)) l.push(item); await this.ctx.storage.put('items', this.items);
     },
@@ -116,12 +122,13 @@ export function installExtras(Cafe) {
       const tokenParam = p.token || url.searchParams.get('token');
 
       /* ----- shop ----- */
+      if (req.method === 'GET' && url.pathname === '/api/pro') { const w = this.walletOfToken(tokenParam); return json(200, { pro: this.proUntil(w) }); }
       if (req.method === 'POST' && url.pathname === '/api/quote') {
         if (!this.allowHits('q:' + ip, 30, 60e3)) return json(429, { error: 'slow down' });
         try { return json(200, await this.makeQuote(String(p.item || ''))); } catch (e) { return json(400, { error: e.message }); }
       }
       if (req.method === 'GET' && url.pathname === '/api/items') {
-        const w = this.walletOfToken(tokenParam); return json(200, { items: w ? this.items[w] || [] : [], vip: !!(w && this.vips[w]) });
+        const w = this.walletOfToken(tokenParam); return json(200, { items: w ? this.items[w] || [] : [], vip: !!(w && this.vips[w]), pro: this.proUntil(w) });
       }
       if (req.method === 'POST' && url.pathname === '/api/buy') {
         const wallet = this.walletOfToken(tokenParam); if (!wallet) return json(401, { error: 'sign in with Phantom first' });
@@ -139,7 +146,25 @@ export function installExtras(Cafe) {
         if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'payment not visible on Solana yet, press again in a minute: you will not be charged twice' : pv === 'used' ? 'this payment was already used' : 'payment not found or too small', code: pv });
         await this.grant(wallet, item); await this.ctx.storage.put('buysig:' + sig, { wallet, item, at: Date.now() });
         this.log('[buy]', item, method, wallet);
-        return json(200, { ok: true, item, items: this.items[wallet] || [], vip: !!this.vips[wallet] });
+        return json(200, { ok: true, item, items: this.items[wallet] || [], vip: !!this.vips[wallet], pro: this.proUntil(wallet) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/plate') {   // a name plate on your coin's desk: paid once, everyone sees it
+        const wallet = this.walletOfToken(tokenParam); if (!wallet) return json(401, { error: 'sign in with Phantom first' });
+        const mint = String(p.mint || ''), sig = String(p.sig || '').trim();
+        const text = String(p.text || '').replace(/[^\w\-À-ɏЀ-ӿ぀-ヿ㐀-䶿一-鿿가-힯 .!?$#·]/g, '').trim().slice(0, 24);
+        const agent = this.agents.find(a => a.mint === mint); if (!agent) return json(400, { error: 'unknown coin' });
+        if (agent.wallet && agent.wallet !== wallet) return json(403, { error: 'only the wallet that launched this coin can name its desk' });
+        if (!text) return json(400, { error: 'empty text' });
+        const done = await this.ctx.storage.get('platesig:' + sig);
+        if (!done) {
+          const pv = await this.checkPayment(sig, this.PLATE_SOL, wallet);
+          if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'payment not visible on Solana yet, press again in a minute: you will not be charged twice' : pv === 'used' ? 'this payment was already used' : 'payment not found or too small', code: pv });
+          await this.ctx.storage.put('platesig:' + sig, { wallet, mint, at: Date.now() });
+        } else if (done.mint !== mint) return json(400, { error: 'this payment was used for another coin' });
+        agent.plate = text; if (!agent.wallet) agent.wallet = wallet;
+        await this.ctx.storage.put('a:' + String(agent.at).padStart(14, '0'), agent);
+        this.broadcast({ t: 'plate', mint, text }); this.log('[plate]', mint, text);
+        return json(200, { ok: true, text });
       }
 
       /* ----- casino ----- */
