@@ -35,7 +35,7 @@ export function installExtras(Cafe) {
     async extrasLoad() { this.items = (await this.ctx.storage.get('items')) || {}; this.subs = (await this.ctx.storage.get('subs')) || {}; },
     proUntil(wallet) { const u = wallet && this.subs[wallet]; return u && u > Date.now() ? u : 0; },
     extrasCfg() {
-      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: this.CASINO_OK ? { net: this.CASINO_NET, house: this.HOUSE.publicKey.toBase58(), rpc: this.CASINO_RPC, min: MIN_BET, max: MAX_BET } : null };
+      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: this.CASINO_OK ? { net: this.CASINO_NET, house: this.HOUSE.publicKey.toBase58(), rpc: this.CASINO_RPC, min: MIN_BET, max: MAX_BET } : null, arcade: this.arcadeCfg() };
     },
     ownedFlair(wallet, list) { const own = new Set((wallet && this.items[wallet]) || []); return (Array.isArray(list) ? list : []).map(String).filter(x => FLAIR_IDS.includes(x) && own.has(x)).slice(0, 6); },
 

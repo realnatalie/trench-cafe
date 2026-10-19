@@ -6,6 +6,7 @@ import { Keypair, Connection, VersionedTransaction, PublicKey, SystemProgram, Tr
 import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 import { installExtras } from './extras.js';
+import { installArcade } from './arcade.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -50,7 +51,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
-    this.extrasInit(env); this.casinoCheck();
+    this.extrasInit(env); this.arcadeInit(env); this.casinoCheck();
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
     this.players = new Map(); this.nextId = 1; this.NONCES = new Map(); this.usedSigs = new Set(); this.hitLog = new Map(); this.launchLog = new Map();
     this.PX = {}; this.OHLC = {}; this.SOL_USD = 0; this.ohlcIdx = 0; this.TRADES = {}; this.txQueue = []; this.ppWs = null; this.ppSubscribed = ''; this.psTick = 0; this.timer = null; this.lastPx = 0;
@@ -204,6 +205,7 @@ export class Cafe extends DurableObject {
         try { const done = await this.finishLaunch(key, rec); return json(200, { ok: true, mint: done.mint, sig: done.sig }); }
         catch (e) { this.log('[launch] not finished yet', symbol, e.message); return json(503, { error: 'pump.fun has not confirmed the coin yet. Press Launch again: you will not be charged twice. (' + String(e.message).slice(0, 120) + ')', code: 'retry' }); }
       }
+      if (url.pathname.startsWith('/api/arcade/')) return await this.arcadeHandle(req, url, ip);
       if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname === '/api/plate' || url.pathname === '/api/pro' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
       if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
@@ -474,3 +476,4 @@ export class Cafe extends DurableObject {
   }
 }
 installExtras(Cafe);
+installArcade(Cafe);
