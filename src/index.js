@@ -51,7 +51,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
-    this.extrasInit(env); this.arcadeInit(env); this.casinoCheck();
+    this.extrasInit(env); this.arcadeInit(env);
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
     this.players = new Map(); this.nextId = 1; this.NONCES = new Map(); this.usedSigs = new Set(); this.hitLog = new Map(); this.launchLog = new Map();
     this.PX = {}; this.OHLC = {}; this.SOL_USD = 0; this.ohlcIdx = 0; this.TRADES = {}; this.txQueue = []; this.ppWs = null; this.ppSubscribed = ''; this.psTick = 0; this.timer = null; this.lastPx = 0;

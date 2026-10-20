@@ -7,6 +7,8 @@ const json = (code, obj) => new Response(JSON.stringify(obj), { status: code, he
 const SIG_RE = /^[1-9A-HJ-NP-Za-km-z]{60,100}$/;
 const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
 const TOP_N = 10;
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const runId = () => { const a = crypto.getRandomValues(new Uint8Array(64)); let s = ''; for (const b of a) s += B58[b % 58]; return s; };   // ids for chip-paid runs share the signature format
 
 export function installArcade(Cafe) {
   Object.assign(Cafe.prototype, {
@@ -14,7 +16,7 @@ export function installArcade(Cafe) {
       const fee = +env.ARCADE_RUN_SOL; this.ARCADE_RUN_SOL = fee > 0 && fee <= 1 ? fee : 0;   // 0 switches ranked runs off
       this.arcBoards = new Map();   // cache of leaderboards per key, cleared on every new score
     },
-    arcadeCfg() { return { fee: this.LIVE ? this.ARCADE_RUN_SOL : 0, games: ARC_GAMES, week: arcWeek() }; },
+    arcadeCfg() { return { fee: this.LIVE ? this.ARCADE_RUN_SOL : 0, chips: this.ARCADE_RUN_CHIPS, games: ARC_GAMES, week: arcWeek() }; },
     async arcBest(span, game, wallet) { return (await this.ctx.storage.get(`abest:${span}:${game}:${wallet}`)) || null; },
     async arcBoard(span, game) {
       const key = span + ':' + game; if (this.arcBoards.has(key)) return this.arcBoards.get(key);
@@ -46,8 +48,16 @@ export function installArcade(Cafe) {
       if (!wallet) return json(401, { error: 'sign in with Phantom first' });
       if (path === 'run') {
         // a ranked run: one fee payment buys exactly one run. The same signature always returns the same run (safe to retry).
-        if (!this.LIVE || !this.ARCADE_RUN_SOL) return json(403, { error: 'ranked runs are off' });
         const game = String(p.game || ''); if (!ARC_GAMES.includes(game)) return json(400, { error: 'unknown game' });
+        if (p.pay === 'chips') {   // paid from the chip balance instead of a SOL transfer
+          const cost = this.ARCADE_RUN_CHIPS; if (!cost) return json(403, { error: 'ranked runs for chips are off' });
+          const left = await this.cspend(wallet, cost); if (left < 0) return json(402, { error: 'not enough chips', code: 'broke', price: cost });
+          const id = runId(), rec = { wallet, game, run: arcMakeRun(game, rnd), issuedAt: Date.now(), startedAt: 0, done: false, chips: cost };
+          await this.ctx.storage.put('arun:' + id, rec);
+          this.log('[arcade] run', game, 'chips', wallet.slice(0, 6));
+          return json(200, { ok: true, id, startedAt: 0, now: Date.now(), balance: left, ...arcPublic(rec.run) });
+        }
+        if (!this.LIVE || !this.ARCADE_RUN_SOL) return json(403, { error: 'ranked runs are off' });
         const sig = String(p.sig || '').trim(); if (!SIG_RE.test(sig)) return json(400, { error: 'bad signature' });
         const have = await this.ctx.storage.get('arun:' + sig);
         if (have) { if (have.wallet !== wallet) return json(403, { error: 'that payment belongs to another wallet' }); if (have.done) return json(409, { error: 'this payment was already used for a run', code: 'done' }); return json(200, { ok: true, again: true, id: sig, startedAt: have.startedAt, now: Date.now(), ...arcPublic(have.run) }); }
