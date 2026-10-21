@@ -13,10 +13,11 @@ export const SHOP = {
   profeed: { sol: 0.1, days: 30 }   // pro trade feed: 30 days
 };
 const FLAIR_IDS = Object.keys(SHOP).filter(k => k !== 'profeed');
-/* chips */
-const CHIP_START = 1000, MIN_BET = 10, MAX_BET = 5000, CR_SPEED = 0.12, CR_WAIT = 2000;
-const CHIP_PACKS_DEFAULT = [{ sol: 0.01, chips: 2000 }, { sol: 0.05, chips: 12000 }, { sol: 0.1, chips: 30000 }];
-const CHIPS_PER_SOL_ITEM = 300000;   // cosmetics priced in chips: a 0.05 SOL item is 15,000 chips
+/* chips: 1 chip is worth about $0.002. A new wallet gets a small trial stack; after that chips are bought in packs priced in USD
+   and paid in SOL at the live price. Chips are also earned in small amounts by the hunts (crates, stories, candles) and by
+   royalties on trades of your own coin. */
+const CHIP_START = 250, MIN_BET = 10, MAX_BET = 5000, CR_SPEED = 0.12, CR_WAIT = 2000, CHIPS_PER_USD = 500;
+const CHIP_PACKS_DEFAULT = [{ usd: 10, chips: 5000 }, { usd: 25, chips: 13500 }, { usd: 50, chips: 30000 }];
 const SLOT = [{ k: 'mug', w: 1, p3: 100, p2: 4 }, { k: 'dia', w: 2, p3: 30, p2: 2.5 }, { k: 'cnd', w: 3, p3: 12, p2: 1.5 }, { k: 'ban', w: 4, p3: 6, p2: 1 }, { k: 'rug', w: 4, p3: 0, p2: 0 }];
 const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
 const dayKey = () => new Date().toISOString().slice(0, 10);
@@ -27,7 +28,7 @@ export function installExtras(Cafe) {
     extrasInit(env) {
       this.PAY_TOKEN_MINT = String(env.PAY_TOKEN_MINT || '').trim();
       this.CHIP_PACKS = CHIP_PACKS_DEFAULT;
-      try { const pk = JSON.parse(env.CHIP_PACKS || 'null'); if (Array.isArray(pk) && pk.length && pk.length <= 6 && pk.every(x => +x.sol > 0 && +x.sol <= 5 && Number.isInteger(+x.chips) && +x.chips > 0)) this.CHIP_PACKS = pk.map(x => ({ sol: +x.sol, chips: +x.chips })); } catch (e) { this.log('[chips] bad CHIP_PACKS, using defaults'); }
+      try { const pk = JSON.parse(env.CHIP_PACKS || 'null'); if (Array.isArray(pk) && pk.length && pk.length <= 6 && pk.every(x => +x.usd >= 1 && +x.usd <= 1000 && Number.isInteger(+x.chips) && +x.chips > 0)) this.CHIP_PACKS = pk.map(x => ({ usd: +x.usd, chips: +x.chips })); } catch (e) { this.log('[chips] bad CHIP_PACKS, using defaults'); }
       this.ARCADE_RUN_CHIPS = Number.isInteger(+env.ARCADE_RUN_CHIPS) && +env.ARCADE_RUN_CHIPS >= 0 ? +env.ARCADE_RUN_CHIPS : 1000;
       this.tokInfo = null; this.tokPx = { usd: 0, at: 0 }; this.rounds = new Map();
       this.VIP_DESK_SOL = +(env.VIP_DESK_SOL ?? 0.05); this.PLATE_SOL = +(env.PLATE_SOL ?? 0.03);
@@ -35,7 +36,7 @@ export function installExtras(Cafe) {
     async extrasLoad() { this.items = (await this.ctx.storage.get('items')) || {}; this.subs = (await this.ctx.storage.get('subs')) || {}; },
     proUntil(wallet) { const u = wallet && this.subs[wallet]; return u && u > Date.now() ? u : 0; },
     extrasCfg() {
-      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: { start: CHIP_START, min: MIN_BET, max: MAX_BET, packs: this.CHIP_PACKS, buy: this.LIVE, itemRate: CHIPS_PER_SOL_ITEM, runChips: this.ARCADE_RUN_CHIPS }, arcade: this.arcadeCfg() };
+      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: { start: CHIP_START, min: MIN_BET, max: MAX_BET, packs: this.CHIP_PACKS, buy: this.LIVE, perUsd: CHIPS_PER_USD, runChips: this.ARCADE_RUN_CHIPS }, arcade: this.arcadeCfg() };
     },
     ownedFlair(wallet, list) { const own = new Set((wallet && this.items[wallet]) || []); return (Array.isArray(list) ? list : []).map(String).filter(x => FLAIR_IDS.includes(x) && own.has(x)).slice(0, 6); },
 
@@ -100,11 +101,17 @@ export function installExtras(Cafe) {
     },
 
     /* ---------- chips ---------- */
-    async cbal(w) { const v = await this.ctx.storage.get('cbal:' + w); if (v === undefined) { await this.ctx.storage.put('cbal:' + w, CHIP_START); await this.ctx.storage.put('cday:' + w, dayKey()); return CHIP_START; } return v; },
+    async cbal(w) { const v = await this.ctx.storage.get('cbal:' + w); if (v === undefined) { await this.ctx.storage.put('cbal:' + w, CHIP_START); return CHIP_START; } return v; },
     async cset(w, n) { n = Math.max(0, Math.floor(n)); await this.ctx.storage.put('cbal:' + w, n); return n; },
     async cspend(w, n) { const bal = await this.cbal(w); if (bal < n) return -1; return this.cset(w, bal - n); },   // -1 = not enough chips
+    async crashSettle(r) {   // the round is over: an auto cash out below the rug point pays, then the round is closed
+      if (r.ended) return; r.ended = true;
+      if (!r.out && r.auto && r.auto < r.cp) { r.out = r.auto; r.win = Math.floor(r.bet * r.auto); await this.cset(r.wallet, (await this.cbal(r.wallet)) + r.win); }
+      await this.ctx.storage.put('cround:' + r.id, r); setTimeout(() => this.rounds.delete(r.id), 60e3);
+    },
     betChips(bet) { const b = Math.floor(+bet); return b >= MIN_BET && b <= MAX_BET ? b : 0; },
-    chipPrice(item) { return Math.round(this.priceSol(item) * CHIPS_PER_SOL_ITEM); },
+    chipPrice(item) { return this.SOL_USD > 0 ? Math.round(this.priceSol(item) * this.SOL_USD * CHIPS_PER_USD) : 0; },   // 0 = no live SOL price yet
+    async cadd(w, n, why) { const bal = await this.cset(w, (await this.cbal(w)) + n); this.sendToWallet(w, { t: 'chips', balance: bal, delta: n, why }); return bal; },
 
     async handleExtras(req, url, ip) {
       const p = req.method === 'POST' ? await this.body(req, 4096).catch(() => ({})) : {};
@@ -124,7 +131,10 @@ export function installExtras(Cafe) {
         const item = String(p.item || ''), sig = String(p.sig || '').trim(), method = p.method === 'token' ? 'token' : p.method === 'chips' ? 'chips' : 'sol';
         if (!this.priceSol(item)) return json(400, { error: 'unknown item' });
         if (method === 'chips') {   // paid from the chip balance: no transaction, no signature
+          if (FLAIR_IDS.includes(item) && (this.items[wallet] || []).includes(item)) return json(200, { ok: true, again: true, item, items: this.items[wallet] || [], vip: !!this.vips[wallet], pro: this.proUntil(wallet), balance: await this.cbal(wallet) });
+          if (item === 'vip' && this.vips[wallet]) return json(200, { ok: true, again: true, item, items: this.items[wallet] || [], vip: true, pro: this.proUntil(wallet), balance: await this.cbal(wallet) });
           const price = this.chipPrice(item), bal = await this.cbal(wallet);
+          if (!price) return json(503, { error: 'no live SOL price yet, try again in a minute' });
           if (bal < price) return json(402, { error: 'not enough chips', code: 'broke', price, balance: bal });
           await this.cset(wallet, bal - price); await this.grant(wallet, item);
           this.log('[buy]', item, 'chips', wallet);
@@ -164,28 +174,31 @@ export function installExtras(Cafe) {
       }
 
       /* ----- chips casino: free refill daily, packs for SOL, server-settled games. Nothing is ever paid out. ----- */
-      if (!url.pathname.startsWith('/api/casino/')) return null;
+      if (!url.pathname.startsWith('/api/casino/')) return json(404, { error: 'unknown call' });
       const wallet = this.walletOfToken(tokenParam); if (!wallet) return json(401, { error: 'sign in with Phantom first' });
       if (!this.allowHits('c:' + wallet, 240, 60e3)) return json(429, { error: 'slow down' });
       const path = url.pathname.slice('/api/casino/'.length);
-      const claimable = async bal => bal < CHIP_START && (await this.ctx.storage.get('cday:' + wallet)) !== dayKey();
-      if (path === 'info') { const bal = await this.cbal(wallet); return json(200, { balance: bal, min: MIN_BET, max: MAX_BET, claim: await claimable(bal), packs: this.CHIP_PACKS, buy: this.LIVE, runChips: this.ARCADE_RUN_CHIPS }); }
-      if (path === 'claim') {   // the daily free refill back up to the starting stack
-        const bal = await this.cbal(wallet); if (!(await claimable(bal))) return json(400, { error: 'no free refill right now', code: 'later' });
-        await this.ctx.storage.put('cday:' + wallet, dayKey());
-        return json(200, { ok: true, credited: CHIP_START - bal, balance: await this.cset(wallet, CHIP_START) });
-      }
-      if (path === 'buy') {   // a chip pack: one SOL payment to the cafe wallet, checked on chain. Same signature = same credit, never twice.
+      if (path === 'info') { const bal = await this.cbal(wallet); return json(200, { balance: bal, min: MIN_BET, max: MAX_BET, packs: this.CHIP_PACKS, buy: this.LIVE && this.SOL_USD > 0, solUsd: this.SOL_USD, runChips: this.ARCADE_RUN_CHIPS }); }
+      if (path === 'quote') {   // a pack is priced in USD and paid in SOL at the live price; the quote is good for 15 minutes
         if (!this.LIVE) return json(403, { error: 'chip packs are off in simulation mode' });
         const pack = this.CHIP_PACKS[Math.floor(+p.pack)]; if (!pack) return json(400, { error: 'unknown pack' });
+        if (!(this.SOL_USD > 0)) return json(503, { error: 'no live SOL price yet, try again in a minute' });
+        const sol = Math.ceil(pack.usd / this.SOL_USD * 1e4) / 1e4, id = crypto.randomUUID();
+        await this.ctx.storage.put('cq:' + id, { pack: Math.floor(+p.pack), sol, at: Date.now() });
+        return json(200, { id, sol, usd: pack.usd, chips: pack.chips, solUsd: this.SOL_USD });
+      }
+      if (path === 'buy') {   // one SOL payment to the cafe wallet for a quoted pack, checked on chain. Same signature = same credit, never twice.
+        if (!this.LIVE) return json(403, { error: 'chip packs are off in simulation mode' });
         const sig = String(p.sig || '').trim(); if (!SIG_RE.test(sig)) return json(400, { error: 'bad signature' });
         const done = await this.ctx.storage.get('cbuy:' + sig);
         if (done) { if (done.wallet !== wallet) return json(400, { error: 'payment belongs to another wallet' }); return json(200, { ok: true, again: true, credited: done.chips, balance: await this.cbal(wallet) }); }
-        const pv = await this.checkPayment(sig, pack.sol, wallet);
+        const q = await this.ctx.storage.get('cq:' + String(p.quote || '')); if (!q || Date.now() - q.at > 864e5) return json(400, { error: 'price quote expired, try again', code: 'quote' });   // a quote is honoured for a day: a late payment still counts
+        const pack = this.CHIP_PACKS[q.pack]; if (!pack) return json(400, { error: 'unknown pack' });
+        const pv = await this.checkPayment(sig, q.sol, wallet);
         if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'payment not visible on Solana yet, press again in a minute: you will not be charged twice' : pv === 'used' ? 'this payment was already used' : 'payment not found or too small', code: pv });
-        await this.ctx.storage.put('cbuy:' + sig, { wallet, chips: pack.chips, at: Date.now() });
+        await this.ctx.storage.put('cbuy:' + sig, { wallet, chips: pack.chips, usd: pack.usd, sol: q.sol, at: Date.now() });
         const bal = await this.cset(wallet, (await this.cbal(wallet)) + pack.chips);
-        this.log('[chips] pack', pack.sol, 'SOL ->', pack.chips, wallet.slice(0, 6));
+        this.log('[chips] pack $' + pack.usd, q.sol, 'SOL ->', pack.chips, wallet.slice(0, 6));
         return json(200, { ok: true, credited: pack.chips, balance: bal });
       }
       if (path === 'flip') {
@@ -205,18 +218,22 @@ export function installExtras(Cafe) {
       }
       if (path === 'crash/start') {
         const bet = this.betChips(p.bet); if (!bet) return json(400, { error: 'bet must be between ' + MIN_BET + ' and ' + MAX_BET + ' chips' });
-        for (const r of this.rounds.values()) if (r.wallet === wallet && !r.ended) return json(400, { error: 'finish your current round first' });
+        for (const r of this.rounds.values()) if (r.wallet === wallet && !r.ended) {
+          const crashAt = r.t0 + Math.log(r.cp) / CR_SPEED * 1000;
+          if (Date.now() < crashAt) return json(400, { error: 'finish your current round first' });
+          await this.crashSettle(r);   // the old round rugged while the player was away: settle it (auto cash out pays) and move on
+        }
         const bal = await this.cbal(wallet); if (bet > bal) return json(400, { error: 'not enough chips', code: 'broke' });
         const u = rnd(), cp = u < 0.03 ? 1 : Math.max(1, Math.floor(97 / (1 - u)) / 100), salt = crypto.randomUUID();
         const r = { id: crypto.randomUUID(), wallet, bet, cp, salt, t0: Date.now() + CR_WAIT, auto: +p.auto > 1 ? +p.auto : 0, out: 0, win: 0, ended: false };
         this.rounds.set(r.id, r); await this.ctx.storage.put('cround:' + r.id, r);
-        return json(200, { id: r.id, startIn: CR_WAIT, speed: CR_SPEED, hash: await sha256hex(cp.toFixed(2) + ':' + salt), balance: await this.cset(wallet, bal - bet) });
+        return json(200, { id: r.id, startIn: CR_WAIT, t0: r.t0, speed: CR_SPEED, hash: await sha256hex(cp.toFixed(2) + ':' + salt), balance: await this.cset(wallet, bal - bet) });
       }
       if (path === 'crash/cashout' || path === 'crash/state') {
         const id = String(p.id || url.searchParams.get('id') || ''); let r = this.rounds.get(id) || await this.ctx.storage.get('cround:' + id);
         if (!r || r.wallet !== wallet) return json(404, { error: 'round not found' }); this.rounds.set(id, r);
         const now = Date.now(), mNow = now < r.t0 ? 1 : Math.exp(CR_SPEED * (now - r.t0) / 1000), crashAt = r.t0 + Math.log(r.cp) / CR_SPEED * 1000;
-        const settle = async () => { if (r.ended) return; r.ended = true; if (!r.out && r.auto && r.auto < r.cp) { r.out = r.auto; r.win = Math.floor(r.bet * r.auto); await this.cset(wallet, (await this.cbal(wallet)) + r.win); } await this.ctx.storage.put('cround:' + id, r); setTimeout(() => this.rounds.delete(id), 60e3); };
+        const settle = () => this.crashSettle(r);
         if (path === 'crash/cashout' && !r.ended && !r.out && now >= r.t0) {
           const m = Math.min(mNow, +p.m > 1 ? +p.m : mNow);
           if (now < crashAt && mNow < r.cp) { const at = r.auto && r.auto <= m ? r.auto : Math.floor(m * 100) / 100; r.out = at; r.win = Math.floor(r.bet * at); await this.cset(wallet, (await this.cbal(wallet)) + r.win); await this.ctx.storage.put('cround:' + id, r); }

@@ -7,6 +7,8 @@ import bs58 from 'bs58';
 import nacl from 'tweetnacl';
 import { installExtras } from './extras.js';
 import { installArcade } from './arcade.js';
+import { installHunt } from './hunt.js';
+import { installLeague } from './league.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -21,6 +23,9 @@ const randHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
 async function sha1hex(buf) { return hex(await crypto.subtle.digest('SHA-1', buf)); }
 function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
 function bytesToB64(bytes) { let s = ''; const u = new Uint8Array(bytes); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+/* a coin image is accepted only as an inline PNG/JPEG/WebP data URL of a sane size or an https link on a known image host; anything else is dropped */
+const IMG_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(ipfs\.io|mypinata\.cloud|pinata\.cloud|pump\.fun|dweb\.link|nftstorage\.link|arweave\.net|irys\.xyz)\/[A-Za-z0-9._~\/?=&%-]{1,300}$/i;
+const safeImage = v => typeof v === 'string' && (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,260000}$/.test(v) || IMG_HOSTS.test(v)) ? v : null;
 const loginMsg = (wallet, nonce) => `Trench Cafe sign-in\nwallet: ${wallet}\nnonce: ${nonce}`;
 
 /* ---------- the Worker: page from assets, everything else to the room ---------- */
@@ -59,7 +64,8 @@ export class Cafe extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const st = this.ctx.storage;
       const ag = await st.list({ prefix: 'a:' }); this.agents = [...ag.values()].sort((a, b) => a.at - b.at);
-      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {}; await this.extrasLoad();
+      this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {}; await this.extrasLoad(); await this.leagueLoad();
+      const su = await st.get('solusd'); if (su && su.usd > 0 && Date.now() - su.at < 6 * 3600e3) this.SOL_USD = su.usd;   // the last known SOL price survives a restart
       const now = Date.now(); let pruned = false; for (const k in this.sessions) if (now - this.sessions[k].at > 90 * 86400e3) { delete this.sessions[k]; pruned = true; } if (pruned) await st.put('sessions', this.sessions);
     });
     if (this.players.size) this.startLoop();
@@ -128,7 +134,9 @@ export class Cafe extends DurableObject {
         let ok = false; try { ok = nacl.sign.detached.verify(new TextEncoder().encode(loginMsg(wallet, p.nonce)), b64ToBytes(String(p.sig)), bs58.decode(wallet)); } catch (e) { }
         if (!ok) return json(401, { error: 'signature does not match' });
         this.NONCES.delete(String(p.nonce));
-        const token = randHex(24); this.sessions[token] = { wallet, at: Date.now() }; await this.ctx.storage.put('sessions', this.sessions);
+        const token = randHex(24); this.sessions[token] = { wallet, at: Date.now() };
+        const keys = Object.keys(this.sessions); if (keys.length > 3000) { keys.sort((a, b) => this.sessions[a].at - this.sessions[b].at); for (const k of keys.slice(0, keys.length - 3000)) delete this.sessions[k]; }   // oldest sessions go first
+        await this.ctx.storage.put('sessions', this.sessions);
         let pr = await this.profile(wallet);
         if (!pr) { pr = { createdAt: Date.now(), passNo: 100000 + parseInt((await sha1hex(new TextEncoder().encode(wallet))).slice(0, 6), 16) % 900000 }; await this.saveProfile(wallet, pr); }
         this.log('[login]', wallet.slice(0, 6));
@@ -189,16 +197,16 @@ export class Cafe extends DurableObject {
         if (rec && rec.done) return json(200, { ok: true, mint: rec.mint, sig: rec.sig, again: true });
         if (!rec) {
           if (this.agents.some(a => a.mint && a.sym === symbol)) return json(400, { error: 'ticker already exists', code: 'ticker' });
-          if (!this.allowLaunch(ip)) return json(429, { error: 'too many launches from this address, try later' });
           const vipDesk = !!p.vip && this.VIP_DESK_SOL > 0;
           if (this.LAUNCH_FEE_SOL || vipDesk) {
             const pv = await this.checkPayment(paySig, this.LAUNCH_FEE_SOL + (vipDesk ? this.VIP_DESK_SOL : 0));
             if (pv !== 'ok') return json(402, pv === 'used' ? { error: 'this payment was already used', code: 'pay_used' } : pv === 'bad' ? { error: 'the fee payment was not found or is too small', code: 'pay_bad' } : { error: 'the fee payment is not visible on Solana yet. Press Launch again in a minute: you will not be charged twice.', code: 'pay_wait' });
+            if (!this.allowLaunch(ip)) return json(429, { error: 'too many launches from this address, try later' });   // the slot is spent only once the fee is confirmed
           }
           const mint = Keypair.generate(), paidBy = paySig ? (await this.ctx.storage.get('sig:' + paySig))?.from || '' : '';
           rec = { wallet: paidBy, vip: vipDesk, mint: mint.publicKey.toBase58(), mintSecret: bs58.encode(mint.secretKey), at: Date.now(), done: false, tries: 0, ip,
             meta: { name: String(p.name || symbol).slice(0, 32), symbol, description: String(p.description || '').slice(0, 300), twitter: String(p.twitter || '').slice(0, 80), telegram: String(p.telegram || '').slice(0, 80), website: String(p.website || '').slice(0, 120) },
-            body: String(p.body || 'degen').slice(0, 16), image: typeof p.image === 'string' && p.image.length < 400000 ? p.image : null, by: String(p.by || '').slice(0, 24) };
+            body: String(p.body || 'degen').slice(0, 16), image: safeImage(p.image), by: String(p.by || '').slice(0, 24) };
           if (!key) key = 'launch:free:' + rec.mint;
           await this.ctx.storage.put(key, rec);
         }
@@ -206,6 +214,8 @@ export class Cafe extends DurableObject {
         catch (e) { this.log('[launch] not finished yet', symbol, e.message); return json(503, { error: 'pump.fun has not confirmed the coin yet. Press Launch again: you will not be charged twice. (' + String(e.message).slice(0, 120) + ')', code: 'retry' }); }
       }
       if (url.pathname.startsWith('/api/arcade/')) return await this.arcadeHandle(req, url, ip);
+      if (url.pathname.startsWith('/api/hunt/')) return await this.huntHandle(req, url, ip);
+      if (url.pathname === '/api/league' || url.pathname.startsWith('/api/league/')) return await this.leagueHandle(req, url, ip);
       if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname === '/api/plate' || url.pathname === '/api/pro' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
       if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
@@ -216,6 +226,23 @@ export class Cafe extends DurableObject {
   liveBoosts() { const now = Date.now(), o = {}; for (const k in this.boosts) if (this.boosts[k] > now) o[k] = this.boosts[k]; return o; }
   allowHits(key, n, windowMs) { const now = Date.now(); const arr = (this.hitLog.get(key) || []).filter(t => now - t < windowMs); if (arr.length >= n) return false; arr.push(now); this.hitLog.set(key, arr); if (this.hitLog.size > 5000) this.hitLog.clear(); return true; }
   allowLaunch(ip) { const now = Date.now(); const arr = (this.launchLog.get(ip) || []).filter(t => now - t < 3600e3); if (arr.length >= this.LAUNCHES_PER_HOUR_PER_IP) return false; arr.push(now); this.launchLog.set(ip, arr); return true; }
+  /* short-lived keys are swept once an hour so storage does not grow forever */
+  async housekeep() {
+    const now = Date.now(), rules = [['cq:', 864e5, 'at'], ['quote:', 864e5, 'at'], ['cround:', 36e5, 't0'], ['roy:', 3 * 864e5, null], ['hcr:', 8 * 864e5, null], ['arun:', 30 * 864e5, 'issuedAt']];
+    let n = 0;
+    for (const [prefix, ttl, field] of rules) {
+      const all = await this.ctx.storage.list({ prefix });
+      for (const [k, v] of all) {
+        let old = false;
+        if (field) old = !(v && v[field] > now - ttl);
+        else { const day = k.split(':')[1]; old = /^\d{4}-\d{2}-\d{2}$/.test(day) && now - Date.parse(day + 'T00:00:00Z') > ttl; }
+        if (old) { await this.ctx.storage.delete(k); n++; }
+      }
+    }
+    if (n) this.log('[housekeep] removed', n);
+  }
+  sendToWallet(wallet, msg) { if (!wallet) return; const raw = JSON.stringify(msg); for (const [ws, me] of this.players) if (me.wallet === wallet) { try { ws.send(raw); } catch (e) { } } }
+  playerPos(wallet) { for (const me of this.players.values()) if (me.wallet === wallet && typeof me.x === 'number') return { x: me.x, z: me.z }; return null; }
   walletOfToken(tok) { const s = tok && this.sessions[tok]; if (!s) return null; if (Date.now() - s.at > 90 * 86400e3) { delete this.sessions[tok]; return null; } return s.wallet; }
   async profile(w) { if (this.profiles.has(w)) return this.profiles.get(w); const pr = await this.ctx.storage.get('prof:' + w); if (pr) this.profiles.set(w, pr); return pr || null; }
   async saveProfile(w, pr) { this.profiles.set(w, pr); await this.ctx.storage.put('prof:' + w, pr); }
@@ -262,6 +289,8 @@ export class Cafe extends DurableObject {
     if (this.psTick % 3 === 0 && this.txQueue.length) { const l = this.txQueue.splice(0, 40); this.txQueue.length = 0; this.broadcast({ t: 'tx', list: l }); }
     if (this.psTick % 150 === 0) { this.pollPrices(); if (!this.ppWs && this.agents.some(a => a.mint)) this.ppConnect(); }
     if (this.psTick % 300 === 10) this.pollSol();
+    if (this.psTick % 300 === 150) this.ctx.waitUntil(this.leagueSettle().catch(e => this.log('[league] settle', e.message)));
+    if (this.psTick % 18000 === 900) this.ctx.waitUntil(this.housekeep().catch(e => this.log('[housekeep]', e.message)));
     if (this.psTick % 100 === 45) this.pollOhlc();
   }
 
@@ -274,7 +303,7 @@ export class Cafe extends DurableObject {
       const next = {};
       for (const p of pairs) { const mint = p.baseToken?.address; if (!mint) continue; const cur = next[mint]; const liq = +(p.liquidity?.usd || 0); if (cur && cur.liq >= liq) continue; next[mint] = { p: +p.priceUsd || 0, mc: +(p.marketCap || p.fdv || 0), v: +(p.volume?.h24 || 0), ch: +(p.priceChange?.h24 || 0), liq, url: p.url || '', pair: p.pairAddress || '', dex: p.dexId || '' }; }
       for (const k in next) delete next[k].liq;
-      Object.assign(this.PX, next); this.broadcast({ t: 'px', px: next });
+      Object.assign(this.PX, next); this.broadcast({ t: 'px', px: next }); this.leaguePeaks(next);
     } catch (e) { this.log('[px] error', e.message); }
   }
   async pollSol() {
@@ -283,7 +312,7 @@ export class Cafe extends DurableObject {
       const r = await fetch('https://api.dexscreener.com/tokens/v1/solana/' + SOL_MINT, { headers: { accept: 'application/json' } }); if (!r.ok) return;
       const pairs = await r.json(); let best = null;
       for (const p of Array.isArray(pairs) ? pairs : []) { if (p.baseToken?.address !== SOL_MINT || !/^(USDC|USDT)$/.test(p.quoteToken?.symbol || '')) continue; if (!best || +(p.liquidity?.usd || 0) > +(best.liquidity?.usd || 0)) best = p; }
-      if (best && +best.priceUsd > 0) { this.SOL_USD = +best.priceUsd; this.broadcast({ t: 'sol', usd: this.SOL_USD }); }
+      if (best && +best.priceUsd > 0) { this.SOL_USD = +best.priceUsd; this.broadcast({ t: 'sol', usd: this.SOL_USD }); await this.ctx.storage.put('solusd', { usd: this.SOL_USD, at: Date.now() }); }
     } catch (e) { this.log('[sol] error', e.message); }
   }
   async pollOhlc() {
@@ -309,7 +338,7 @@ export class Cafe extends DurableObject {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; } if (!m || !m.mint || !m.txType) return;
         const tx = { mint: m.mint, side: m.txType === 'sell' ? 'sell' : 'buy', sol: +(+m.solAmount || 0).toFixed(4), mcapSol: +(+m.marketCapSol || 0).toFixed(2), vSol: +(+m.vSolInBondingCurve || 0).toFixed(2), trader: String(m.traderPublicKey || '').slice(0, 44), sig: String(m.signature || '').slice(0, 100), ts: Date.now() };
         (this.TRADES[tx.mint] = this.TRADES[tx.mint] || []).unshift(tx); this.TRADES[tx.mint].length = Math.min(this.TRADES[tx.mint].length, 30);
-        this.txQueue.push(tx);
+        this.txQueue.push(tx); this.ctx.waitUntil(this.leagueTrade(tx).catch(e => this.log('[league] trade', e.message)));
       });
       ws.addEventListener('close', () => { this.ppWs = null; });
       ws.addEventListener('error', () => { this.ppWs = null; });
@@ -414,7 +443,7 @@ export class Cafe extends DurableObject {
         try { const d = bs58.decode(ix.data); let o = 8; const str = () => { const n = d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24); o += 4; const v = new TextDecoder().decode(d.slice(o, o + n)); o += n; return v; }; name = str(); symbol = str(); uri = str(); } catch (e) { continue; }
         if (!symbol) continue;
         let md = {}; if (/^https?:\/\//.test(uri)) { try { const r = await fetch(uri, { signal: AbortSignal.timeout(8000) }); if (r.ok) md = await r.json(); } catch (e) { } }
-        const rec = { mint, sig: s.signature, at: (s.blockTime || 0) * 1000 || Date.now(), body: 'degen', image: typeof md.image === 'string' ? md.image : null, by: '',
+        const rec = { mint, sig: s.signature, at: (s.blockTime || 0) * 1000 || Date.now(), body: 'degen', image: safeImage(md.image), by: '',
           meta: { name: String(name).slice(0, 32), symbol: String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'COIN', description: String(md.description || '').slice(0, 300), twitter: String(md.twitter || '').slice(0, 80), telegram: String(md.telegram || '').slice(0, 80), website: String(md.website || '').slice(0, 120) } };
         await this.commitLaunch('launch:recovered:' + mint, rec);
         this.log('[recover] added', rec.meta.symbol, mint);
@@ -450,18 +479,25 @@ export class Cafe extends DurableObject {
     if (!amountSol) return 'ok';
     sig = String(sig || ''); if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return 'bad';
     if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return 'used';
-    for (let i = 0; i < 15; i++) {
-      let tx = null; try { tx = await this.rpcJson('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]); } catch (e) { this.log('[pay] rpc', e.message); }
-      if (tx) {
-        if (tx.meta?.err) return 'bad';
-        const ixs = tx.transaction?.message?.instructions || [];
-        const hit = ixs.find(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
-        if (hit) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, { at: Date.now(), from: hit.parsed.info.source }); }
-        return hit ? 'ok' : 'bad';
+    if (!this.payBusy) this.payBusy = new Set();
+    if (this.payBusy.has(sig)) return 'wait';   // the same signature is being checked by another request: never two credits
+    this.payBusy.add(sig);
+    try {
+      for (let i = 0; i < 15; i++) {
+        let tx = null; try { tx = await this.rpcJson('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]); } catch (e) { this.log('[pay] rpc', e.message); }
+        if (tx) {
+          if (tx.meta?.err) return 'bad';
+          const ixs = tx.transaction?.message?.instructions || [];
+          const hit = ixs.find(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
+          if (!hit) return 'bad';
+          if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return 'used';
+          this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, { at: Date.now(), from: hit.parsed.info.source });
+          return 'ok';
+        }
+        await new Promise(r => setTimeout(r, 3000));
       }
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    return 'wait';
+      return 'wait';
+    } finally { this.payBusy.delete(sig); }
   }
   async verifyPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) { return (await this.checkPayment(sig, amountSol, from)) === 'ok'; }
   async sweepToPayout() {
@@ -477,3 +513,5 @@ export class Cafe extends DurableObject {
 }
 installExtras(Cafe);
 installArcade(Cafe);
+installHunt(Cafe);
+installLeague(Cafe);
