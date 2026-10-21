@@ -58,8 +58,9 @@ export function installLeague(Cafe) {
       await this.ctx.storage.put('league:' + old.week, old);
     },
     leagueView(wallet) {
-      const coins = Object.entries(this.LG ? this.LG.coins : {}).map(([mint, c]) => { const a = this.agents.find(x => x.mint === mint); return a ? { mint, sym: a.sym, name: a.name, image: a.image || '', body: a.body, by: a.by || '', pool: c.pool, backers: Object.keys(c.backers).length, peak: c.peak, trades: c.trades, mine: (wallet && c.backers[wallet]) || 0, own: !!(wallet && a.wallet === wallet) } : null; }).filter(Boolean);
-      coins.sort((p, q) => q.peak - p.peak || q.pool - p.pool || q.trades - p.trades);
+      const zero = { pool: 0, backers: {}, peak: 0, trades: 0 };   // every launched coin is in the league from its first minute
+      const coins = this.agents.filter(a => a.mint).slice(-60).map(a => { const c = (this.LG && this.LG.coins[a.mint]) || zero; return { mint: a.mint, sym: a.sym, name: a.name, image: a.image || '', body: a.body, by: a.by || '', pool: c.pool, backers: Object.keys(c.backers).length, peak: c.peak, trades: c.trades, mine: (wallet && c.backers[wallet]) || 0, own: !!(wallet && a.wallet === wallet), at: a.at }; });
+      coins.sort((p, q) => q.peak - p.peak || q.pool - p.pool || q.trades - p.trades || q.at - p.at);
       return { week: this.LG ? this.LG.week : arcWeek(), endsAt: weekEnd(), coins, champs: this.CHAMPS.slice(0, 4), rules: { min: BACK_MIN, max: BACK_MAX, cut: LAUNCHER_CUT, royalty: ROYALTY, royaltyCap: ROYALTY_DAY_CAP } };
     },
     async leagueHandle(req, url, ip) {
