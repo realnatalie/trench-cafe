@@ -41,7 +41,8 @@ export function installArcade(Cafe) {
         if (game !== 'all' && !ARC_GAMES.includes(game)) return json(400, { error: 'unknown game' });
         const rows = await this.arcBoard(span, game);
         const me = wallet ? { rank: rows.findIndex(r => r.w === wallet) + 1, best: rows.find(r => r.w === wallet)?.s || 0 } : null;
-        return json(200, { game, span, week: arcWeek(), top: rows.slice(0, TOP_N), players: rows.length, me });
+        const top = await Promise.all(rows.slice(0, TOP_N).map(async r => ({ ...r, n: ((await this.profile(r.w)) || {}).nick || '' })));   // nicknames, so boards show people, not addresses
+        return json(200, { game, span, week: arcWeek(), top, players: rows.length, me });
       }
       if (req.method !== 'POST') return json(405, { error: 'method' });
       if (!this.allowHits('arc:' + ip, 60, 60e3)) return json(429, { error: 'slow down' });

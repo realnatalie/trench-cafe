@@ -9,6 +9,7 @@ import { installExtras } from './extras.js';
 import { installArcade } from './arcade.js';
 import { installHunt } from './hunt.js';
 import { installLeague } from './league.js';
+import { installRef } from './ref.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -33,7 +34,7 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-    if (url.pathname === '/' || url.pathname === '/index.html') return env.ASSETS.fetch(req);
+    if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/og.png') return env.ASSETS.fetch(req);
     return env.CAFE.get(env.CAFE.idFromName('main')).fetch(req);
   },
   async scheduled(ev, env, ctx) {
@@ -216,6 +217,7 @@ export class Cafe extends DurableObject {
       if (url.pathname.startsWith('/api/arcade/')) return await this.arcadeHandle(req, url, ip);
       if (url.pathname.startsWith('/api/hunt/')) return await this.huntHandle(req, url, ip);
       if (url.pathname === '/api/league' || url.pathname.startsWith('/api/league/')) return await this.leagueHandle(req, url, ip);
+      if (url.pathname.startsWith('/api/ref/')) return await this.refHandle(req, url, ip);
       if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname === '/api/plate' || url.pathname === '/api/pro' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
       if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
@@ -515,3 +517,4 @@ installExtras(Cafe);
 installArcade(Cafe);
 installHunt(Cafe);
 installLeague(Cafe);
+installRef(Cafe);
