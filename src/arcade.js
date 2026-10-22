@@ -94,6 +94,7 @@ export function installArcade(Cafe) {
         const rank = await this.arcRank(week, rec.game, wallet), rankAll = await this.arcRank(week, 'all', wallet);
         const best = (await this.arcBest(week, rec.game, wallet))?.s || result.score;
         if (result.score >= 1000) this.broadcast({ t: 'arcade', game: rec.game, wallet, score: result.score });   // a perfect run is announced to the room
+        await this.bankMark(wallet, 'rk');
         return json(200, { ok: true, ...result, answers: rec.run.rounds.map(r => r.a), newBest: !!bests[week], best, rank, rankAll, week, grace: ARC_GRACE_MS });
       }
       return json(404, { error: 'unknown arcade call' });

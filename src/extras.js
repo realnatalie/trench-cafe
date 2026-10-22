@@ -36,7 +36,7 @@ export function installExtras(Cafe) {
     async extrasLoad() { this.items = (await this.ctx.storage.get('items')) || {}; this.subs = (await this.ctx.storage.get('subs')) || {}; },
     proUntil(wallet) { const u = wallet && this.subs[wallet]; return u && u > Date.now() ? u : 0; },
     extrasCfg() {
-      return { shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: { start: CHIP_START, min: MIN_BET, max: MAX_BET, packs: this.CHIP_PACKS, buy: this.LIVE, perUsd: CHIPS_PER_USD, runChips: this.ARCADE_RUN_CHIPS }, arcade: this.arcadeCfg() };
+      return { bank: this.bankPrices ? this.bankPrices() : null, shop: SHOP, vipDeskFee: this.VIP_DESK_SOL, plateFee: this.PLATE_SOL, payToken: this.PAY_TOKEN_MINT ? { mint: this.PAY_TOKEN_MINT, symbol: this.tokInfo?.symbol || '' } : null, casino: { start: CHIP_START, min: MIN_BET, max: MAX_BET, packs: this.CHIP_PACKS, buy: this.LIVE, perUsd: CHIPS_PER_USD, runChips: this.ARCADE_RUN_CHIPS }, arcade: this.arcadeCfg() };
     },
     ownedFlair(wallet, list) { const own = new Set((wallet && this.items[wallet]) || []); return (Array.isArray(list) ? list : []).map(String).filter(x => FLAIR_IDS.includes(x) && own.has(x)).slice(0, 6); },
 
@@ -157,7 +157,7 @@ export function installExtras(Cafe) {
       if (req.method === 'POST' && url.pathname === '/api/plate') {   // a name plate on your coin's desk: paid once, everyone sees it
         const wallet = this.walletOfToken(tokenParam); if (!wallet) return json(401, { error: 'sign in with Phantom first' });
         const mint = String(p.mint || ''), sig = String(p.sig || '').trim();
-        const text = String(p.text || '').replace(/[^\w\-À-ɏЀ-ӿ぀-ヿ㐀-䶿一-鿿가-힯 .!?$#·]/g, '').trim().slice(0, 24);
+        const text = String(p.text || '').replace(/[^\w\-\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF .!?$#·]/g, '').trim().slice(0, 24);
         const agent = this.agents.find(a => a.mint === mint); if (!agent) return json(400, { error: 'unknown coin' });
         if (agent.wallet && agent.wallet !== wallet) return json(403, { error: 'only the wallet that launched this coin can name its desk' });
         if (!text) return json(400, { error: 'empty text' });
@@ -197,6 +197,7 @@ export function installExtras(Cafe) {
         const pv = await this.checkPayment(sig, q.sol, wallet);
         if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'payment not visible on Solana yet, press again in a minute: you will not be charged twice' : pv === 'used' ? 'this payment was already used' : 'payment not found or too small', code: pv });
         await this.ctx.storage.put('cbuy:' + sig, { wallet, chips: pack.chips, usd: pack.usd, sol: q.sol, at: Date.now() });
+        await this.bankLog(wallet, pack.chips, 'pack');
         const bal = await this.cset(wallet, (await this.cbal(wallet)) + pack.chips);
         this.log('[chips] pack $' + pack.usd, q.sol, 'SOL ->', pack.chips, wallet.slice(0, 6));
         return json(200, { ok: true, credited: pack.chips, balance: bal });

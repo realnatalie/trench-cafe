@@ -75,7 +75,7 @@ export function installLeague(Cafe) {
         if (!(chips >= BACK_MIN && chips <= BACK_MAX)) return json(400, { error: `back with ${BACK_MIN} to ${BACK_MAX} chips at a time` });
         if ((c.backers[wallet] || 0) + chips > BACK_WALLET_MAX) return json(400, { error: 'that is already a big bag on one agent' });
         const left = await this.cspend(wallet, chips); if (left < 0) return json(402, { error: 'not enough chips', code: 'broke' });
-        c.pool += chips; c.backers[wallet] = (c.backers[wallet] || 0) + chips; this.leagueSave();
+        c.pool += chips; c.backers[wallet] = (c.backers[wallet] || 0) + chips; this.leagueSave(); await this.bankMark(wallet, 'lg');
         const a = this.agents.find(x => x.mint === mint);
         this.broadcast({ t: 'league', mint, pool: c.pool, backers: Object.keys(c.backers).length });
         if (a && a.wallet && a.wallet !== wallet) this.sendToWallet(a.wallet, { t: 'backed', sym: a.sym, chips });

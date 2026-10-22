@@ -10,6 +10,7 @@ import { installArcade } from './arcade.js';
 import { installHunt } from './hunt.js';
 import { installLeague } from './league.js';
 import { installRef } from './ref.js';
+import { installBank } from './bank.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -17,7 +18,7 @@ const LOOK_KEYS = ['base', 'emote', 'photo', 'body', 'build', 'skin', 'hair', 'h
 const RPC_ALLOWED = new Set(['getBalance', 'getLatestBlockhash', 'getSignatureStatuses', 'getTokenAccountsByOwner', 'getParsedTokenAccountsByOwner', 'getTokenAccountBalance', 'sendTransaction', 'simulateTransaction', 'getAccountInfo', 'getTransaction', 'getMinimumBalanceForRentExemption', 'getRecentPrioritizationFees', 'getBlockHeight', 'getSlot', 'getMultipleAccounts']);
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'POST,GET,OPTIONS' };
 const json = (code, obj) => new Response(JSON.stringify(obj), { status: code, headers: { 'content-type': 'application/json', ...CORS } });
-const cleanNick = n => String(n || '').replace(/[^\w\-À-ɏЀ-ӿ぀-ヿ㐀-䶿一-鿿가-힯 .]/g, '').slice(0, 16);
+const cleanNick = n => String(n || '').replace(/[^\w\-\u00C0-\u024F\u0400-\u04FF\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF .]/g, '').slice(0, 16);
 function cleanLook(l) { if (!l || typeof l !== 'object') return undefined; const o = {}; for (const k of LOOK_KEYS) { const v = l[k]; if (typeof v === 'string' && /^[#\w]{1,40}$/.test(v)) o[k] = v; } return o; }
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 const randHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
@@ -170,10 +171,8 @@ export class Cafe extends DurableObject {
         if (done) return json(200, { ok: true, mint: done.mint, until: this.boosts[done.mint] || done.until, again: true });
         const pv = await this.checkPayment(sig, this.BOOST_FEE_SOL);
         if (pv !== 'ok') return json(402, { error: pv === 'wait' ? 'the payment is not visible on Solana yet, press again in a minute: you will not be charged twice' : 'boost payment not found', code: pv });
-        const until = Math.max(Date.now(), this.boosts[mint] || 0) + this.BOOST_MIN * 60e3;
-        this.boosts[mint] = until; for (const k in this.boosts) if (this.boosts[k] < Date.now()) delete this.boosts[k];
+        const until = this.applyBoost(mint);
         await this.ctx.storage.put('boosts', this.boosts); await this.ctx.storage.put('boostsig:' + sig, { mint, until });
-        this.broadcast({ t: 'boost', mint, until }); this.log('[boost]', mint, new Date(until).toISOString());
         return json(200, { ok: true, mint, until });
       }
       if (url.pathname === '/api/launch-status') {   // lets a player who paid see for sure whether the coin exists
@@ -218,6 +217,7 @@ export class Cafe extends DurableObject {
       if (url.pathname.startsWith('/api/hunt/')) return await this.huntHandle(req, url, ip);
       if (url.pathname === '/api/league' || url.pathname.startsWith('/api/league/')) return await this.leagueHandle(req, url, ip);
       if (url.pathname.startsWith('/api/ref/')) return await this.refHandle(req, url, ip);
+      if (url.pathname.startsWith('/api/bank/')) return await this.bankHandle(req, url, ip);
       if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname === '/api/plate' || url.pathname === '/api/pro' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
       if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
@@ -246,6 +246,12 @@ export class Cafe extends DurableObject {
   sendToWallet(wallet, msg) { if (!wallet) return; const raw = JSON.stringify(msg); for (const [ws, me] of this.players) if (me.wallet === wallet) { try { ws.send(raw); } catch (e) { } } }
   playerPos(wallet) { for (const me of this.players.values()) if (me.wallet === wallet && typeof me.x === 'number') return { x: me.x, z: me.z }; return null; }
   walletOfToken(tok) { const s = tok && this.sessions[tok]; if (!s) return null; if (Date.now() - s.at > 90 * 86400e3) { delete this.sessions[tok]; return null; } return s.wallet; }
+  applyBoost(mint) {   // paid in SOL or in chips: the coin goes on the big screen and the top of the feed
+    const until = Math.max(Date.now(), this.boosts[mint] || 0) + this.BOOST_MIN * 60e3;
+    this.boosts[mint] = until; for (const k in this.boosts) if (this.boosts[k] < Date.now()) delete this.boosts[k];
+    this.broadcast({ t: 'boost', mint, until }); this.log('[boost]', mint, new Date(until).toISOString());
+    return until;
+  }
   async profile(w) { if (this.profiles.has(w)) return this.profiles.get(w); const pr = await this.ctx.storage.get('prof:' + w); if (pr) this.profiles.set(w, pr); return pr || null; }
   async saveProfile(w, pr) { this.profiles.set(w, pr); await this.ctx.storage.put('prof:' + w, pr); }
   async prunePhotos() {
@@ -509,7 +515,7 @@ export class Cafe extends DurableObject {
       if (send < 0.01 * 1e9) return;
       const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: this.OWNER.publicKey, toPubkey: new PublicKey(this.PAYOUT_WALLET), lamports: send }));
       tx.feePayer = this.OWNER.publicKey; tx.recentBlockhash = (await this.rpcJson('getLatestBlockhash', [{ commitment: 'confirmed' }])).value.blockhash; tx.sign(this.OWNER); const sig = bs58.encode(tx.signature); await this.rpcJson('sendTransaction', [bytesToB64(tx.serialize()), { encoding: 'base64' }]);
-      this.log('[sweep]', (send / 1e9).toFixed(4), 'SOL →', this.PAYOUT_WALLET, sig);
+      this.log('[sweep]', (send / 1e9).toFixed(4), 'SOL ->', this.PAYOUT_WALLET, sig);
     } catch (e) { this.log('[sweep] error', e.message); }
   }
 }
@@ -518,3 +524,4 @@ installArcade(Cafe);
 installHunt(Cafe);
 installLeague(Cafe);
 installRef(Cafe);
+installBank(Cafe);

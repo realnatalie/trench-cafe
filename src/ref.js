@@ -3,11 +3,12 @@
 // A weekly table of the best recruiters feeds the board in the town square.
 // Installed onto the Cafe Durable Object by installRef(Cafe).
 import { arcWeek } from './arcade-games.js';
+import { BANK } from './bank.js';
 const json = (code, obj) => new Response(JSON.stringify(obj), { status: code, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } });
 const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const newCode = () => { const a = crypto.getRandomValues(new Uint8Array(7)); let s = ''; for (const b of a) s += ABC[b % ABC.length]; return s; };
 const UID_RE = /^[a-f0-9]{16,32}$/, CODE_RE = /^[A-Z2-9]{7}$/;
-const cleanName = s => String(s || '').replace(/[^\w\-Ѐ-ӿ一-鿿぀-ヿ가-힯 .]/g, '').trim().slice(0, 16);
+const cleanName = s => String(s || '').replace(/[^\w\-\u0400-\u04FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF .]/g, '').trim().slice(0, 16);
 async function ipTag(ip) {   // never stored raw: a short salted hash, only to tell "same network" apart
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('trench-ref:' + ip));
   return [...new Uint8Array(d)].slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -38,6 +39,11 @@ export function installRef(Cafe) {
       const ipt = await ipTag(ip);
       if (path === 'me') {
         const u = await this.refUser(uid, ipt, true, p.nick);
+        const w = p.token ? this.walletOfToken(p.token) : null;   // a signed-in inviter collects invite chips on this wallet
+        if (w && (u.wallet !== w || u.chipsPending)) {
+          u.wallet = w; const pend = u.chipsPending || 0; u.chipsPending = 0; await this.ctx.storage.put('ref:u:' + uid, u);
+          if (pend > 0) await this.bankEarn(w, pend, 'invite');
+        }
         return json(200, { code: u.code, invited: u.n, unpaid: Math.max(0, u.n - u.paid), by: !!(await this.ctx.storage.get('ref:by:' + uid)) });
       }
       if (path === 'collect') {
@@ -60,6 +66,10 @@ export function installRef(Cafe) {
         const w = await this.refWeek(), row = w.rows[owner] || (w.rows[owner] = { n: 0, at: 0, nick: '' });
         row.n++; row.at = Date.now(); row.nick = u.nick || row.nick;
         await this.ctx.storage.put('ref:wk', w);
+        if (row.n <= BANK.inviteWeekCap) {   // chips for the inviter, now or the next time they sign in
+          if (u.wallet) await this.bankEarn(u.wallet, BANK.invite, 'invite');
+          else { u.chipsPending = (u.chipsPending || 0) + BANK.invite; await this.ctx.storage.put('ref:u:' + owner, u); }
+        }
         this.log('[ref] join', code);
         return json(200, { ok: true, from: u.nick || '' });
       }

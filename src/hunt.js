@@ -23,7 +23,7 @@ export function installHunt(Cafe) {
         const [x, z] = CRATE_SPOTS[i]; let near = false; for (const me of this.players.values()) if (me.wallet === wallet && typeof me.x === 'number' && Math.hypot(me.x - x, me.z - z) <= 6) near = true;
         if (!near) return json(400, { error: 'walk up to the crate first', code: 'far' });
         claimed.push(i); await this.ctx.storage.put(key, claimed);
-        const balance = await this.cadd(wallet, HUNT.crate, 'crate');
+        const balance = await this.cadd(wallet, HUNT.crate, 'crate'); await this.bankMark(wallet, 'crate'); await this.bankLog(wallet, HUNT.crate, 'crate');
         return json(200, { ok: true, credited: HUNT.crate, balance, claimed });
       }
       if ((path === 'egg' || path === 'candles') && !this.playerPos(wallet)) return json(400, { error: 'enter the cafe first', code: 'far' });   // rewards are for players in the room

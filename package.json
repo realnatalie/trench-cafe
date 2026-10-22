@@ -1,12 +1,17 @@
 {
-  "name": "clout-cafe-cf",
-  "version": "1.0.0",
+  "name": "trench-cafe",
+  "version": "1.4.0",
+  "description": "A 3D multiplayer net cafe on Solana: every desk is a live pump.fun coin.",
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "logs": "wrangler tail"
+    "logs": "wrangler tail",
+    "test": "node --test test/*.test.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check": "npm test && npm run check:i18n"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.3",
@@ -14,6 +19,13 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.1.0",
+    "@fontsource-variable/onest": "^5.1.0",
+    "@fontsource-variable/unbounded": "^5.1.0",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.24.0",
+    "three": "0.169.0",
     "wrangler": "^4.0.0"
-  }
+  },
+  "engines": { "node": ">=18" }
 }

@@ -1,128 +1,137 @@
-# Trench Cafe (репозиторий clout-cafe) на Cloudflare: пошагово
+# Trench Cafe
 
-Эта папка целиком живёт на Cloudflare: страница игры лежит на их CDN, а «комната» (кто онлайн, чат, запуски токенов, цены, сделки, вход кошельком, профили, фото) работает внутри одного Durable Object. Отдельный сервер не нужен.
+**A 3D multiplayer net cafe in the Solana trenches.** Every desk is a live [pump.fun](https://pump.fun) coin: sit down, launch a real token in about a minute, and let the whole lobby watch your chart. Walk around a small night town with a casino, a ranked arcade, a weekly league, hidden Solana history cards, a bartender who hands out daily tasks, and a big board of the week's best launches, runs and recruiters.
 
-Файлы:
-- `src/index.js` - вся логика комнаты.
-- `public/index.html` - сама игра. Когда я присылаю обновление, меняется только этот файл (и иногда `src/index.js`).
-- `wrangler.jsonc` - настройки (цены, лимиты, адрес выплат). Секреты (ключ кошелька, ссылка RPC) здесь НЕ хранятся.
+Live: **https://clout-cafe.fkamilev102.workers.dev**
 
-## Способ 0. Быстрый просмотр без мультиплеера (2 минуты, без терминала)
+![Trench Cafe](public/og.png)
 
-Для этого есть отдельный архив `clout-cafe-pages.zip` (в нём один файл `index.html`, всё внутри: 3D, шрифты, код).
+---
 
-1. dash.cloudflare.com → слева **Workers & Pages** → **Create** → вкладка **Pages** → **Upload assets**.
-2. Название проекта (например `cloutcafe-preview`) → **Create project** → перетащи `clout-cafe-pages.zip` → **Deploy site**.
-3. Обновить: открой этот проект → **Create deployment** (или «Upload new version») → перетащи новый `clout-cafe-pages.zip` → **Save and Deploy**. Адрес остаётся тот же.
-4. Если открыл сайт, а там старая версия: обнови страницу с очисткой кэша (Ctrl+Shift+R на Windows, Cmd+Shift+R на Mac, на телефоне закрой вкладку и открой заново).
+## What's inside
 
-Это витрина: работают лендинг, персонажи, кафе, город и мини-игры, но игроки не видят друг друга, а запуск только тестовый (монета с пометкой TEST видна только тебе и пропадает после перезагрузки). В начале кафе пустое: ни монет, ни графиков. Для мультиплеера, настоящих монет и живых графиков - способ 1 ниже.
+| | |
+|---|---|
+| **Real launches** | Name, ticker, picture, socials → a real pump.fun coin, created by the server and seated at a desk for everyone in real time. Live trades, market cap and charts on every desk monitor and the big screen. |
+| **Multiplayer** | Everyone online shares one room: avatars, chat bubbles, emotes, megaphone shouts, live feeds. One Cloudflare Durable Object holds the state. |
+| **Characters** | 15 block characters plus a full editor (body, build, hair, eyes, outfit, colours, accessories, emotes, a photo face, three chat phrases). |
+| **Chip economy** | A play currency for the casino, ranked arcade, the league, boosts, desk plates, cosmetics, the megaphone and a double-XP espresso. Earned through a daily streak, daily tasks, crates, cards, royalties and invites. Chips never turn back into SOL. |
+| **Ranked arcade** | Six skill games (Rug Radar, Degen Math, Address Lock, Chart Eye, Ticker Sprint, Quant Sprint). Runs are issued and scored by the server; weekly and all-time boards. |
+| **Trench League** | Every coin launched here is in a weekly league. Back coins with chips; the highest peak market cap of the week wins the pool. |
+| **Exploration** | 36 Solana story cards with their own art, daily chip crates, green candles, a card album with rarities. |
+| **Progression** | Levels and titles, XP from everything, a daily tracker, a minimap, a hotbar. |
+| **Social** | Invite pass with a personal link, share-to-X pictures generated in the browser, a weekly board in the town square, a generative lo-fi soundtrack with room ambience. |
+| **Five languages** | English, 中文, 日本語, 한국어, Español. |
 
-## Способ 1. Через терминал (10 минут, потом каждое обновление за 30 секунд)
+## How it works
 
-1. Установи Node.js: nodejs.org → кнопка LTS → установить как обычную программу.
-2. Распакуй архив `clout-cafe-cloudflare.zip` в любую папку, например `Документы/clout-cafe`.
-3. Открой терминал в этой папке:
-   - Windows: открой папку в Проводнике, в адресной строке напиши `cmd` и нажми Enter.
-   - Mac: правый клик по папке → «Новый терминал в папке» (или Terminal и `cd` в папку).
-4. Напиши по очереди (после каждой строки Enter и ждёшь, пока закончится):
-   ```
-   npm install
-   npx wrangler login
-   ```
-   Откроется браузер, войди в Cloudflare (или зарегистрируйся, это бесплатно) и нажми «Allow». В терминале появится «Successfully logged in».
-5. Выкладываем:
-   ```
-   npx wrangler deploy
-   ```
-   При первом запуске спросит, создать ли адрес `*.workers.dev` - ответь `y`. В конце появится строка вида
-   `https://clout-cafe.ТВОЁ-ИМЯ.workers.dev` - это и есть сайт. Открой его на компьютере и с телефона.
+```
+ browser  ──HTTPS──▶  Cloudflare Worker  ──▶  static page (public/index.html)
+    │                        │
+    └────── WebSocket ──────▶ Durable Object "Cafe"  ── Solana RPC / PumpPortal / price feeds
+                             (room state, chat, launches, chips, boards, storage)
+```
 
-Пока ключ не добавлен, запуски **тестовые**: мультиплеер, чат, кошелёк, конструктор и фото настоящие, а тестовая монета видна только тому, кто её запустил (у других кафе остаётся пустым). Настоящие монеты, графики и сделки появятся после шагов ниже.
+* **One page, no CDN.** The whole game (three.js, fonts, styles, code) is bundled into a single `public/index.html` by `scripts/build.mjs`.
+* **One room.** `src/index.js` defines the Worker and the `Cafe` Durable Object. Feature modules install themselves onto it: `extras.js` (shop, chips, casino), `arcade.js`, `hunt.js`, `league.js`, `ref.js` (invite pass), `bank.js` (chip bank).
+* **Shared rules.** `src/arcade-games.js` and `src/hunt-data.js` are imported by the server and also compiled into the browser bundle, so both sides agree on runs and crate spots.
+* **Wallet sign-in** is a signed message in Phantom: no transaction and no fee. Payments are ordinary SOL transfers that the server verifies on chain before it acts.
 
-## Включить настоящие запуски (LIVE)
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/API.md](docs/API.md).
 
-1. В Phantom создай **отдельный новый** кошелёк (горячий, для сервера). Положи на него 0.2 SOL. Настройки → Безопасность → Показать приватный ключ, скопируй.
-2. Зарегистрируйся на helius.dev (бесплатно), создай API-ключ, скопируй ссылку вида `https://mainnet.helius-rpc.com/?api-key=...`
-3. В терминале в папке проекта:
-   ```
-   npx wrangler secret put OWNER_SECRET_KEY
-   ```
-   вставь приватный ключ, Enter. Потом
-   ```
-   npx wrangler secret put RPC_URL
-   ```
-   вставь ссылку Helius, Enter. Затем ещё раз `npx wrangler deploy`, чтобы комната перезапустилась с ключом.
-4. Проверка: открой `https://твой-адрес/api/health`, там должно быть `"live": true`.
-5. Для первого теста поставь маленький сбор: в `wrangler.jsonc` строка `"LAUNCH_FEE_SOL": "0.05"` → `"0.01"`, сохрани, `npx wrangler deploy`. Запусти одну монету с запасного кошелька: через 10-20 секунд появится CA и ссылка на pump.fun, монета сядет за стол у всех, а большой экран покажет LIVE ON PUMP.FUN. Купи на 0.01 SOL: сделка сразу появится в ленте, на мониторе стола и на графике. Через пару минут подтянутся цена и график DexScreener. Потом верни сбор обратно.
+## Project layout
 
-Комиссии создателя и всё, что выше резерва 0.08 SOL, каждые 10 минут сами уходят на адрес выплат из `wrangler.jsonc` (`PAYOUT_WALLET`).
+```
+client/
+  shell.html            page markup and all styles
+  src/                  the game, as ordered modules sharing one scope (see scripts/sources.mjs)
+    00-core.js          renderer, scene, post-processing, base strings, helpers
+    01-i18n.js          translations
+    02-characters.js    block characters and the editor's parts
+    03-world.js         cafe room, desks, town, places
+    04-world-details.js props, machines, big screen, scenery
+    05-easter-eggs.js   Solana story cards and their art
+    06-game.js          avatars, movement, camera, proximity, NPCs
+    07-ui.js            landing, character select, panels, launch wizard, world screens
+    08-minigames.js     free mini-games
+    09-casino.js        chips casino
+    10-arcade.js        ranked arcade
+    11-hunt.js          crates and candles
+    12-league.js        Trench League
+    13-net.js           multiplayer socket, wallet, payments
+    14-shop.js          cosmetics
+    15-hud.js           level, XP, minimap, hotbar, card album
+    16-social.js        bartender, music, invite pass, share to X, weekly board
+    17-bank.js          chip bank
+src/                    Cloudflare Worker + Durable Object (server)
+scripts/                build and checks
+test/                   unit tests for the shared rules and the chip bank
+public/                 built page + link preview image (served as static assets)
+docs/                   architecture and API notes
+```
 
-## Обновления и правки
+## Run it locally
 
-Я присылаю новый архив → ты заменяешь файлы в папке (чаще всего только `public/index.html`) → в терминале `npx wrangler deploy`. Через 30 секунд обновление у всех.
+Requirements: Node.js 18+.
 
-Логи в реальном времени: `npx wrangler tail` (видно `[launch]`, `[login]`, `[claim]`, `[sweep]`, ошибки). Остановить: Ctrl+C.
+```bash
+npm install
+npm run build          # client/ → public/index.html (+ dist/standalone.html)
+npm run dev            # wrangler dev: page + room on http://localhost:8787
+```
 
-## Способ 2. Без терминала, через GitHub (всё в браузере)
+Without a server key the room runs in **test mode**: multiplayer, chat, the editor, chips and games all work, launches are simulated and visible only to the player who made them.
 
-1. github.com → зарегистрируйся → справа вверху «+» → **New repository**. Имя строго `clout-cafe`, выбери **Private**, нажми **Create repository**.
-2. На странице пустого репозитория нажми ссылку **uploading an existing file**. Распакуй `clout-cafe-cloudflare.zip`, открой получившуюся папку, выдели всё внутри (папки `src`, `public` и файлы `wrangler.jsonc`, `package.json`, `package-lock.json`, `README.md`) и перетащи в окно GitHub. Дождись, пока все файлы появятся в списке, внизу нажми **Commit changes**.
-3. dash.cloudflare.com → **Workers & Pages** → **Create application** → рядом с **Import a repository** нажми **Get started** → подключи GitHub (Cloudflare попросит установить своё приложение на GitHub: разреши доступ к репозиторию `clout-cafe`) → выбери `clout-cafe`.
-4. В настройках проекта: имя проекта `clout-cafe` (должно совпадать с `name` в `wrangler.jsonc`), **Build command** = `npm install`, **Deploy command** оставь `npx wrangler deploy`. Нажми **Save and Deploy** (или **Deploy**). Через 1-3 минуты появится адрес `https://clout-cafe.ТВОЁ-ИМЯ.workers.dev`.
-5. Секреты (когда будешь включать настоящие запуски): страница воркера → **Settings** → **Variables and Secrets** → **Add** → тип **Secret**: `OWNER_SECRET_KEY` и `RPC_URL` → **Deploy**.
-6. Обновления: в репозитории на GitHub открой папку `public` → **Add file** → **Upload files** → перетащи новый `index.html` → **Commit changes**. Cloudflare сам пересоберёт сайт за 1-3 минуты.
+```bash
+npm test               # unit tests
+npm run check          # unit tests + translation check
+```
 
-## Свой домен
+`dist/standalone.html` opens straight from disk: a single-player preview with no server.
 
-Если домен уже на Cloudflare: страница воркера → Settings → Domains & Routes → Add → Custom domain → ввести `cloutcafe.fun`. HTTPS включится сам.
+## Deploy
 
-## Сколько стоит
+The repository is connected to Cloudflare Workers Builds: every push to `main` deploys. By hand:
 
-Бесплатного тарифа хватает на тесты и небольшую аудиторию (100 000 запросов в день). Если на запуск придёт толпа и она будет сидеть в игре часами, нужен Workers Paid за 5 $ в месяц: Cloudflare dashboard → Workers & Pages → Plans. Переносить ничего не надо, тот же адрес.
+```bash
+npx wrangler login
+npm run build
+npm run deploy
+```
 
-## Если что-то не так
+### Going live
 
-- `npx wrangler deploy` ругается на `durable_objects` или `migrations` - убедись, что в терминале ты именно в папке с `wrangler.jsonc`.
-- Сайт открылся, но «0 online» и игроки не видят друг друга - открой `https://твой-адрес/api/health`; если там ошибка, пришли мне текст.
-- `"live": false` после добавления ключа - сделай `npx wrangler deploy` ещё раз.
-- Ключ утёк - переведи деньги на другой кошелёк, сделай новый, `npx wrangler secret put OWNER_SECRET_KEY` заново.
+Real launches need two secrets (never commit them):
 
-## Магазин и оплата токеном
+```bash
+npx wrangler secret put OWNER_SECRET_KEY   # base58 key of a fresh hot wallet used by the server
+npx wrangler secret put RPC_URL            # a mainnet RPC URL, e.g. Helius
+```
 
-- Цены вещей и VIP заданы в SOL (VIP: `VIP_FEE_SOL`, вещи: файл `src/extras.js`, объект `SHOP`).
-- Чтобы принимать оплату токеном проекта, впиши адрес токена (mint) в переменную `PAY_TOKEN_MINT` (Cloudflare → Workers → clout-cafe → Settings → Variables and Secrets, или в `wrangler.jsonc`).
-- Сумма в токенах считается в момент покупки по живой цене DexScreener: цена в SOL × курс SOL ÷ курс токена. Токены приходят на `PAYOUT_WALLET`.
+Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy `.dev.vars.example` to `.dev.vars`.
 
-## Казино на фишках, игровые автоматы, охота и лига
+### Configuration (`wrangler.jsonc` → `vars`)
 
-Вдоль правой стены кафе стоят девять автоматов: шесть игр рейтинговой аркады и три игры казино (слоты, Rug Crash, Pump or Dump). Подходишь, жмёшь E, играешь. Та же аркада и казино открываются из зданий на площади.
+| Variable | Meaning |
+|---|---|
+| `LAUNCH_FEE_SOL` | price of a launch |
+| `VIP_FEE_SOL`, `VIP_DESK_SOL` | VIP pass, VIP desk at launch |
+| `BOOST_FEE_SOL`, `BOOST_MINUTES` | big-screen boost price and length (also payable in chips) |
+| `PLATE_SOL` | desk name plate (also payable in chips) |
+| `ARCADE_RUN_SOL`, `ARCADE_RUN_CHIPS` | price of a ranked arcade run |
+| `CHIP_PACKS` | chip packs: USD price → chips |
+| `DEV_BUY_SOL` | optional first buy made by the server at launch |
+| `PAY_TOKEN_MINT` | optional SPL token accepted in the shop |
+| `PAYOUT_WALLET`, `RESERVE_SOL` | treasury address for the scheduled sweep and the hot-wallet reserve |
+| `LAUNCHES_PER_HOUR_PER_IP` | launch rate limit |
+| `PHOTO_MAX_KB` | max size of an uploaded face photo |
 
-**Фишки**: единая игровая валюта, 1 фишка ≈ $0.002.
-- Новый кошелёк получает пробный стек 250 фишек, и всё. Ежедневного пополнения нет: дальше фишки покупаются или зарабатываются.
-- Пакеты фишек в долларах (`CHIP_PACKS`, по умолчанию $10 = 5 000, $25 = 13 500, $50 = 30 000). Платёж в SOL по живому курсу (сервер берёт цену SOL с DexScreener и выдаёт котировку на 15 минут), из Phantom на `PAYOUT_WALLET`. Один платёж = одно зачисление.
-- Куда тратятся: ставки в казино (10..5000, считает сервер), рейтинговые забеги аркады (`ARCADE_RUN_CHIPS`, 1000 фишек, либо `ARCADE_RUN_SOL` 0.01 SOL), вещи в магазине (цена в SOL × курс SOL × 500), поддержка агентов в лиге.
-- Откуда ещё берутся (понемногу): ежедневные ящики в городе (4 штуки, по 25 фишек, места меняются каждый день, сервер проверяет, что игрок стоит рядом), истории Solana (36 табличек и постеров про проекты и события Solana, по 20 за каждую найденную; подсказки к ненайденным висят на доске объявлений), полная охота за свечами (250 один раз), роялти с чужих сделок по своей монете (5 фишек за сделку, до 200 в день), выплаты лиги.
-- **Фишки нельзя вывести, продать или обменять на SOL**, сервер никому ничего не выплачивает. Это написано на сайте.
+`SITE_URL` (environment variable for `npm run build`) sets the absolute address used in link previews.
 
-**Trench League (еженедельно, ISO-неделя по UTC)**: каждая монета, запущенная в кафе, автоматически участвует. Игроки поддерживают агента фишками (50..5000 за раз, до 20 000 на одного агента). В конце недели побеждает монета с наибольшей пиковой капитализацией за неделю: её сторонники делят весь банк пропорционально вкладу, запустивший получает 10% банка и кубок у хранилища с названием монеты. Таблица лиги: панель Launch pad, табло в кафе, блок в карточке монеты.
+## Notes on chips
 
-## Производительность при толпе
+Chips are a closed play currency. They are bought in packs or earned in game, and spent in game. There is no way to withdraw, sell or transfer them, and the casino pays out in chips only.
 
-Клиент рассчитан на 100+ человек в одной комнате: рисуются только 36 ближайших игроков (18 на телефоне), тени есть только у 12 ближайших, далёкие аватары анимируются через кадр, а невидимые не стоят ничего. Если устройство всё равно не тянет (кадр дольше 38 мс три секунды подряд), картинка упрощается сама по шагам: сначала разрешение, потом свечение (bloom), потом тени. На сильных машинах ничего не меняется.
+## Tech
 
-## Платные места и подписки
-
-- **VIP-ряд столов** (задний ряд, 8 столов с золотой отделкой): запуск монеты там стоит обычную плату плюс `VIP_DESK_SOL` (по умолчанию 0.05 SOL). Оплата одной транзакцией на `PAYOUT_WALLET`.
-- **Именная табличка** над столом своей монеты: `PLATE_SOL` (0.03 SOL), кнопка в панели монеты. Текст до 24 символов, видят все.
-- **PRO FEED** (0.1 SOL за 30 дней): уведомления о китах со звуком, адреса трейдеров в ленте, полная история вместо последних 12 событий. Покупается в магазине.
-
-## Рейтинговая аркада (игры на мастерство, реальный SOL)
-
-В «Neon arcade» шесть игр на скорость и внимание: Rug Radar, Degen Math, Address Lock, Chart Eye, Ticker Sprint, Quant Sprint.
-
-- **Практика** бесплатна и без ограничений, считается прямо в браузере, на сервер ничего не уходит.
-- **Рейтинговый забег** стоит `ARCADE_RUN_SOL` (по умолчанию 0.005 SOL) за одну попытку. Игрок платит из Phantom одной транзакцией на `PAYOUT_WALLET`; сервер проверяет платёж в сети (та же проверка, что у магазина: подпись одноразовая, повторно её использовать нельзя), выдаёт раунды, засекает время по своим часам и считает очки. Один платёж = один забег, повтор запроса с той же подписью возвращает тот же забег, двойного списания нет.
-- Очки: до 1000 за точность плюс до 100 за скорость. Таблицы: за неделю (ISO-неделя) и за всё время, по каждой игре и общая (сумма лучших результатов). Табло «RANKED RUNS» на стене аркады показывает лидеров недели. Идеальный забег объявляется всему залу.
-- **Никаких выплат нет и быть не может**: очки не обмениваются и не выводятся, сервер не хранит балансы игроков. Это платный вход в игру на мастерство, а не ставка.
-- Выключить: поставить `ARCADE_RUN_SOL` = `0` в `wrangler.jsonc` (кнопки «Ranked» исчезнут, практика останется).
+[three.js](https://threejs.org) · [esbuild](https://esbuild.github.io) · [Cloudflare Workers + Durable Objects](https://developers.cloudflare.com/durable-objects/) · [@solana/web3.js](https://solana-labs.github.io/solana-web3.js/) · [PumpPortal](https://pumpportal.fun) · WebAudio · Canvas 2D
