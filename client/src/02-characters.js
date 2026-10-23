@@ -99,6 +99,8 @@ function drawFace(ctx, style, o) {
     case 'cat': for (const s of [-1, 1]) { ell(128 + s * 42, 108, 20, 26, '#b4ff8a'); ell(128 + s * 42, 108, 6, 22, ink); ell(128 + s * 42 - 7, 98, 4, 5, '#fff'); } ell(128, 146, 8, 6, '#ff8fb8'); curve(108, 158, 118, 170, 128, 158, 7); curve(128, 158, 138, 170, 148, 158, 7); for (const s of [-1, 1]) for (let i = 0; i < 3; i++) line(128 + s * 64, 140 + i * 14, 128 + s * 118, 130 + i * 20, 5); break;
     case 'ninja': rrect(18, 128, 220, 128, 34, o.mask || '#1a1724'); eyes({ h: 21, y: 104 }); brows(0.6, 76); break;
     case 'boo': for (const s of [-1, 1]) ell(128 + s * 38, 112, 18, 26, ink); ell(128, 172, 16, 24, ink); break;
+    case 'glasses': eyes({ h: 22, y: 110 }); ctx.strokeStyle = '#0d0c10'; ctx.lineWidth = 10; ctx.lineJoin = 'round'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.roundRect(128 + s * 42 - 36, 84, 72, 50, 10); ctx.stroke(); } line(120, 104, 136, 104, 8, '#0d0c10'); line(56, 100, 22, 94, 8, '#0d0c10'); line(200, 100, 234, 94, 8, '#0d0c10'); for (const s of [-1, 1]) ell(128 + s * 42 - 18, 96, 9, 4, 'rgba(255,255,255,.35)'); line(110, 172, 146, 170, 9); break;
+    case 'stubble': { eyes({ h: 22 }); brows(0.15, 74); const st = o.hair || ink; ctx.globalAlpha = 0.32; let r = 7; const rn = () => (r = (r * 9301 + 49297) % 233280) / 233280; for (let i = 0; i < 260; i++) { const a = rn() * Math.PI, rr = 70 + rn() * 46, x = 128 + Math.cos(a) * rr * 1.1, y = 128 + Math.sin(a) * rr * 0.95; if (y > 136) ell(x, y, 2.6, 2.6, st); } for (let i = 0; i < 40; i++) ell(100 + rn() * 56, 150 + rn() * 10, 2.4, 2.4, st); ctx.globalAlpha = 1; smile(44, 166, 8, 8); break; }
     case 'blank': break;
   }
 }
@@ -216,6 +218,22 @@ function hatStyle(P, style, col, accent) {
     case 'bandana': add(head, RBOX(h * 1.12, h * 0.22, h * 1.12, 0.05), cl, 0, h * 0.3, 0); add(head, RBOX(h * 0.22, h * 0.22, h * 0.22, 0.06), cl, 0, h * 0.26, -h * 0.62); for (const s of [-1, 1]) { const t = add(head, RBOX(h * 0.12, h * 0.5, 0.03, 0.02), cl, s * h * 0.12, 0, -h * 0.66); t.rotation.z = s * 0.4; } break;
     case 'astro': add(head, RBOX(h * 1.42, h * 1.42, h * 1.42, 0.36), PHYS(0xcfe6ff, { roughness: 0.05, transparent: true, opacity: 0.22, clearcoat: 1, depthWrite: false }), 0, h * 0.04, 0).castShadow = false; add(head, CYL(h * 0.72, h * 0.76, 0.1, 20), METAL(0xd9dde6, { roughness: 0.4 }), 0, -h * 0.66, 0); break;
     case 'halo': add(head, new THREE.TorusGeometry(h * 0.5, 0.03, 8, 28), GLOW(0xffe066, 1.6), 0, h * 0.98, 0).rotation.x = Math.PI / 2; break;
+    case 'curly': {   // a mop of round curls; light hair gets lighter tips
+      const base = new THREE.Color(hexOf(col)), hsl = base.getHSL({}), cm = M(base.getHex(), { roughness: 0.85 });
+      const lt = hsl.l > 0.22 ? M(base.clone().lerp(new THREE.Color(0xf3dcb0), 0.4).getHex(), { roughness: 0.85 }) : M(base.clone().multiplyScalar(1.35).getHex(), { roughness: 0.85 });
+      add(head, RBOX(h * 1.08, h * 0.3, h * 1.08, 0.06), cm, 0, h * 0.42, 0); add(head, RBOX(h * 1.08, h * 0.55, h * 0.3, 0.06), cm, 0, h * 0.1, -h * 0.42);
+      let k = 0; for (let ix = -3; ix <= 3; ix++) for (let iz = -3; iz <= 3; iz++) { if (ix * ix + iz * iz > 10) continue; k++; const r = h * (0.12 + ((ix * 7 + iz * 13 + 40) % 5) * 0.01); add(head, SPH(r, 12, 10), k % 3 === 0 ? lt : cm, ix * h * 0.155, h * (0.58 + ((ix + iz + 8) % 3) * 0.035 - (ix * ix + iz * iz) * 0.008), iz * h * 0.155); }
+      for (let i = -3; i <= 3; i++) add(head, SPH(h * 0.11, 12, 10), i % 2 ? lt : cm, i * h * 0.15, h * (0.44 + (i % 2) * 0.03), h * 0.5);   // curls falling on the forehead
+      for (const s of [-1, 1]) for (let i = 0; i < 4; i++) add(head, SPH(h * 0.11, 10, 8), cm, s * h * 0.54, h * (0.36 - i * 0.04), h * (0.3 - i * 0.24));
+      break;
+    }
+    case 'fringe': {   // short sides, textured top, a straight fringe over the brow
+      add(head, RBOX(h * 1.1, h * 0.34, h * 1.1, 0.07), m, 0, h * 0.42, 0); add(head, RBOX(h * 1.1, h * 0.55, h * 0.3, 0.05), m, 0, h * 0.1, -h * 0.42);
+      for (const s of [-1, 1]) add(head, RBOX(h * 0.08, h * 0.3, h * 0.84, 0.03), m, s * h * 0.53, h * 0.22, -h * 0.06);
+      for (let i = 0; i < 6; i++) { const f = add(head, RBOX(h * 0.19, h * (0.22 + (i % 2) * 0.07), h * 0.09, 0.03), m, (i - 2.5) * h * 0.18, h * (0.3 - (i % 2) * 0.035), h * 0.53); f.rotation.z = (i - 2.5) * 0.06; f.rotation.x = -0.12; }
+      for (let i = 0; i < 5; i++) add(head, RBOX(h * 0.2, h * 0.08, h * 0.26, 0.03), m, (i - 2) * h * 0.2, h * 0.6, h * (0.12 - (i % 2) * 0.24));
+      break;
+    }
     case 'none': default: break;
   }
 }
@@ -234,6 +252,22 @@ function gearStyle(P, acc, col, accent, hairCol) {
     case 'scarf': add(torso, RBOX(h * 1.2, 0.13, h * 1.2, 0.05), CLOTH(col), 0, B.th + 0.02, 0); add(torso, RBOX(0.14, 0.42, 0.035, 0.03), CLOTH(col), 0.1, B.th - 0.22, B.td / 2 + 0.03); break;
     case 'sword': { const g = new THREE.Group(); g.position.set(-0.08, B.th * 0.6, -B.td / 2 - 0.08); g.rotation.z = 0.5; torso.add(g); add(g, BOX(0.06, 0.9, 0.02), METAL(0xd9dde6, { roughness: 0.25 }), 0, 0.3, 0); add(g, BOX(0.2, 0.05, 0.05), METAL(0xffc633), 0, -0.16, 0); add(g, CYL(0.03, 0.03, 0.2, 10), CLOTH(0x3a2618), 0, -0.28, 0); break; }
     case 'jetpack': { const m = METAL(0xd9dde6, { roughness: 0.4 }); for (const s of [-1, 1]) { add(torso, CYL(0.09, 0.09, B.th * 0.8, 14), m, s * 0.14, B.th * 0.5, -B.td / 2 - 0.1); add(torso, CONE(0.07, 0.14, 10), GLOW(accent, 1.4), s * 0.14, B.th * 0.06, -B.td / 2 - 0.1).rotation.x = Math.PI; } add(torso, RBOX(0.42, 0.1, 0.1, 0.02), m, 0, B.th * 0.8, -B.td / 2 - 0.1); break; }
+    case 'wine': {   // a glass of red in the right hand
+      const hand = P.armR && P.armR.userData.hand; if (!hand) break;
+      const g = new THREE.Group(); g.position.set(0, -0.04, 0.16); g.scale.setScalar(1.7); hand.add(g);
+      const glass = PHYS(0xffffff, { roughness: 0.05, transparent: true, opacity: 0.38, clearcoat: 1, depthWrite: false });
+      add(g, CYL(0.05, 0.055, 0.012, 16), glass, 0, -0.06, 0); add(g, CYL(0.01, 0.01, 0.12, 8), glass, 0, 0, 0);
+      add(g, CYL(0.075, 0.04, 0.13, 18), glass, 0, 0.12, 0).castShadow = false;
+      add(g, CYL(0.064, 0.042, 0.065, 18), M(0x6e0b22, { roughness: 0.15 }), 0, 0.093, 0);
+      break;
+    }
+    case 'watch': {   // a steel watch on the left wrist
+      const arm = P.armL; if (!arm) break; const steel = METAL(0xc9ced8, { roughness: 0.22 });
+      const y = -B.ah + B.aw / 2 + 0.17; add(arm, RBOX(B.aw + 0.026, 0.08, B.ad + 0.026, 0.02), steel, 0, y, 0);
+      add(arm, RBOX(0.12, 0.12, 0.02, 0.02), steel, 0, y, B.ad / 2 + 0.016);
+      add(arm, RBOX(0.09, 0.09, 0.012, 0.015), M(0x1a2236, { roughness: 0.2 }), 0, y, B.ad / 2 + 0.027);
+      break;
+    }
     case 'none': default: break;
   }
 }
@@ -259,9 +293,9 @@ const LOOK_OPTS = {
   emote: ['auto', ...EMOTES],
   body: ['classic', 'robot', 'ghost', 'metal'],
   build: ['normal', 'slim', 'big', 'small'],
-  hair: ['short', 'bowl', 'spiky', 'mohawk', 'bun', 'long', 'cap', 'backcap', 'beanie', 'tophat', 'cowboy', 'pirate', 'wizard', 'helmet', 'bucket', 'crown', 'bandana', 'astro', 'none'],
-  eyes: ['smile', 'grin', 'chill', 'wink', 'cute', 'cool', 'angry', 'shock', 'laugh', 'sleepy', 'shades', 'visor', 'dead', 'stache', 'beard', 'pirate', 'cat', 'ninja', 'boo'],
-  acc: ['none', 'chain', 'headphones', 'backpack', 'cape', 'wings', 'halo', 'horns', 'catears', 'scarf', 'sword', 'jetpack'],
+  hair: ['short', 'curly', 'fringe', 'bowl', 'spiky', 'mohawk', 'bun', 'long', 'cap', 'backcap', 'beanie', 'tophat', 'cowboy', 'pirate', 'wizard', 'helmet', 'bucket', 'crown', 'bandana', 'astro', 'none'],
+  eyes: ['smile', 'glasses', 'stubble', 'grin', 'chill', 'wink', 'cute', 'cool', 'angry', 'shock', 'laugh', 'sleepy', 'shades', 'visor', 'dead', 'stache', 'beard', 'pirate', 'cat', 'ninja', 'boo'],
+  acc: ['none', 'chain', 'watch', 'wine', 'headphones', 'backpack', 'cape', 'wings', 'halo', 'horns', 'catears', 'scarf', 'sword', 'jetpack'],
   top: ['tee', 'hoodie', 'jacket', 'suit', 'tank', 'armor', 'robe'],
   skins: ['#f3cbb5', '#e8b894', '#dcae88', '#c48a63', '#9a6a48', '#6e4c42', '#3e2b27', '#ffd36e', '#9ff2c8', '#7fd4ff', '#cdbcff', '#ff9ad5', '#f4f4f4', '#9aa3b2', '#e5bf72', '#1a1724'],
   cols: ['#ff4fa3', '#43e8ff', '#ffc94a', '#52f5a8', '#ff6a2a', '#a66bff', '#ffffff', '#1a1724', '#2b3d66', '#a8122c', '#2fb8a8', '#e5bf72', '#5a3a22', '#f2f2f2', '#9aa3b2', '#1f6a3a']
@@ -436,6 +470,8 @@ function buildChar(id, tint, look, ov) {
     case 'sheriff': add(P.torso, CYL(0.07, 0.07, 0.015, 5), METAL(0xffc633), -0.16, P.B.th * 0.68, P.B.td / 2 + 0.02).rotation.x = Math.PI / 2; break;   // star badge
     case 'wizard': { const st = new THREE.Group(); P.armL.userData.hand.add(st); st.position.set(0, 0.1, 0.08); add(st, CYL(0.025, 0.03, 1.3, 8), CLOTH(0x5a3a22), 0, 0.3, 0); add(st, SPH(0.08, 12, 10), GLOW(0xa66bff, 1.6), 0, 0.98, 0); break; }
     case 'midas': for (const s of [-1, 1]) add(s < 0 ? P.armL : P.armR, new THREE.TorusGeometry(0.17, 0.025, 8, 18), METAL(0xffc633), 0, -0.33, 0).rotation.x = Math.PI / 2; break;   // bangles
+    case 'kimchi': add(P.head, SPH(0.024, 10, 8), METAL(0xd9dde6, { roughness: 0.2 }), -P.hs * 0.53, -P.hs * 0.14, 0.02); break;   // a small earring
+    case 'rasmr': add(P.armR, new THREE.TorusGeometry(0.15, 0.018, 8, 18), METAL(0xd9dde6, { roughness: 0.25 }), 0, -0.36, 0).rotation.x = Math.PI / 2; break;   // the bracelet
     case 'kitty': add(P.torso, RBOX(0.09, 0.09, 0.5, 0.04), FUR(hexOf(L.hairCol)), 0.2, 0.16, -P.B.td / 2 - 0.2).rotation.x = -0.8; break;   // tail
     case 'zombo': add(P.torso, RBOX(0.2, 0.12, 0.03, 0.02), CLOTH(0x3a4a3a), 0.12, P.B.th * 0.3, P.B.td / 2 + 0.012); add(P.legR, RBOX(0.14, 0.08, 0.03, 0.02), CLOTH(0x4a3a2a), 0.03, -0.3, P.B.ld / 2 + 0.01); break;   // patches
     case 'degen': textPlate(P.torso, '$', '#ffffff', null, 0.16, 0.16, 0.14, P.B.th * 0.62, P.B.td / 2 + 0.012, 120); break;

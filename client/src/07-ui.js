@@ -183,7 +183,7 @@ function selStep(d) { selIdx = (selIdx + d + PLAYABLE.length) % PLAYABLE.length;
 function renderSelect() {
   if (introPhase !== 'select' && $('#select').hidden) return;
   const c = PLAYABLE[selIdx]; if (!c) return;
-  $('#selName').textContent = c.id === 'custom' ? (myNick || c.name) : c.name; $('#selKind').textContent = c.kind === 'custom' ? t('sel_custom') : t('sel_meme'); $('#selKind').className = 'kind ' + c.kind;
+  $('#selName').textContent = c.id === 'custom' ? (myNick || c.name) : c.name; $('#selKind').textContent = c.kind === 'custom' ? t('sel_custom') : c.trader ? t('sel_trader') : t('sel_meme'); $('#selKind').className = 'kind ' + c.kind;
   $('#custEd').hidden = false; document.body.classList.toggle('ed-on', c.id === 'custom'); $('#custEd').classList.toggle('lite', c.id !== 'custom'); $('#edRandom').hidden = c.id !== 'custom'; renderEditor(c);
   $('#selBio').textContent = c.bio[LANG] || c.bio.en;
   { const r = selRarity(c); const si = $('.sel-info'); si.dataset.rar = r; si.style.setProperty('--rc', RARITY[r]); $('#selKind').textContent = t('r_' + r) + ' · ' + $('#selKind').textContent; }
