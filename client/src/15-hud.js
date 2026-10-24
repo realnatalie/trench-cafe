@@ -263,7 +263,7 @@ document.addEventListener('click', e => { const c = e.target.closest('[data-card
 
 /* ---- the character screen as a game lobby: tabs for the editor, rarity, a big PLAY button ---- */
 let edTab = store.get('cc_edtab', 'look');
-function selRarity(c) { if (c.kind === 'custom') return 'epic'; const s = (c.stats || [0, 0, 0]).reduce((a, b) => a + b, 0); return s >= 12 ? 'legendary' : s >= 10 ? 'epic' : s >= 8 ? 'rare' : 'common'; }
+const selRarity = charRarity;
 function edTabsHTML(full) {
   const tabs = full ? ['look', 'face', 'emote', 'say'] : ['face', 'emote', 'say'];
   if (!tabs.includes(edTab)) edTab = tabs[0];

@@ -1785,7 +1785,10 @@ const CHARS = [
   { id: 'custom', kind: 'custom', name: 'YOUR OWN', emote: 'selfie', stats: [3, 3, 3], bio: { en: 'Build your own: body, face, hat, gear, colors and a nickname. Everyone online sees it.' } }
 ];
 const CHAR = Object.fromEntries(CHARS.map(c => [c.id, c]));
-const PLAYABLE = CHARS.filter(c => !c.npc);
+/* rarity comes from the stat total; the lobby lists legendary first, then epic, rare and common (stable inside a tier) */
+function charRarity(c) { if (c.kind === 'custom') return 'epic'; const s = (c.stats || [0, 0, 0]).reduce((a, b) => a + b, 0); return s >= 12 ? 'legendary' : s >= 10 ? 'epic' : s >= 8 ? 'rare' : 'common'; }
+const RARITY_ORDER = { legendary: 0, epic: 1, rare: 2, common: 3 };
+const PLAYABLE = CHARS.filter(c => !c.npc).map((c, i) => ({ c, i, r: RARITY_ORDER[charRarity(c)] + (c.kind === 'custom' ? -0.5 : 0) })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.c);
 const TOWNSFOLK = CHARS.filter(c => c.npc);
 
 

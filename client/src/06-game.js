@@ -328,7 +328,7 @@ function updateCompanion(av, dt, time) {
 
 /* ================= player + camera + input ================= */
 let player = null, playing = false, camMode = 'orbit';
-let charChoice = store.get('cc_char', 'degen'); if (!CHAR[charChoice] || CHAR[charChoice].npc) charChoice = 'degen';
+let charChoice = store.get('cc_char', PLAYABLE[0].id); if (!CHAR[charChoice] || CHAR[charChoice].npc) charChoice = PLAYABLE[0].id;   // a first visit opens on the top of the list
 let myNick = String(store.get('cc_nick', '') || '').slice(0, 16), myLook = sanitizeLook(store.get('cc_look', null));
 const myName = () => myNick || (charChoice === 'custom' ? 'PLAYER' : CHAR[charChoice].name);
 const cam = { yaw: 0, pitch: 0.5, dist: 7.5, target: new THREE.Vector3(0, 1.2, 12) };
