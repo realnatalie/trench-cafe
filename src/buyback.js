@@ -34,9 +34,12 @@ export function installBuyback(Cafe) {
     buybackInit(env) {
       const num = (v, d) => (v === undefined || v === '' || !isFinite(+v) ? d : +v);
       let key = null; try { if (env.BUYBACK_SECRET_KEY) key = Keypair.fromSecretKey(bs58.decode(String(env.BUYBACK_SECRET_KEY).trim())); } catch (e) { this.log('[buyback] bad BUYBACK_SECRET_KEY'); }
+      const expect = String(env.BUYBACK_WALLET || '').trim();   // the public address the key must belong to: a wrong key keeps the robot off
+      let keyMismatch = false;
+      if (key && expect && key.publicKey.toBase58() !== expect) { this.log('[buyback] BUYBACK_SECRET_KEY does not belong to BUYBACK_WALLET, robot stays off'); key = null; keyMismatch = true; }
       let mint = String(env.BUYBACK_MINT || '').trim(); try { if (mint) mint = new PublicKey(mint).toBase58(); } catch (e) { this.log('[buyback] bad BUYBACK_MINT'); mint = ''; }
       this.BB = {
-        key, pub: key ? key.publicKey.toBase58() : '', mint,
+        key, pub: key ? key.publicKey.toBase58() : expect, mint, keyMismatch,
         share: Math.min(1, Math.max(0, num(env.BUYBACK_SHARE, BUYBACK_DEFAULTS.share))),
         mode: env.BUYBACK_MODE === 'hold' ? 'hold' : 'burn',
         from: env.BUYBACK_FROM === 'fees' ? 'fees' : 'all',
@@ -104,7 +107,7 @@ export function installBuyback(Cafe) {
     },
     async buybackView() {
       const BB = this.BB || {}, st = await this.buybackStats();
-      return { on: this.buybackOn(), mint: BB.mint || '', wallet: BB.pub || '', mode: BB.mode || 'burn', share: BB.share || 0, from: BB.from || 'all', sol: st.sol, bought: st.bought, burned: st.burned, decimals: st.decimals, fed: st.fed || 0, buys: st.buys.slice(0, 10) };
+      return { on: this.buybackOn(), ready: { key: !!BB.key, keyMatches: !BB.keyMismatch, mint: !!BB.mint, server: !!this.OWNER }, mint: BB.mint || '', wallet: BB.pub || '', mode: BB.mode || 'burn', share: BB.share || 0, from: BB.from || 'all', sol: st.sol, bought: st.bought, burned: st.burned, decimals: st.decimals, fed: st.fed || 0, buys: st.buys.slice(0, 10) };
     },
     async buybackHandle(req, url) {
       if (req.method === 'GET' && url.pathname === '/api/buyback') return json(200, await this.buybackView());

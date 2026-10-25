@@ -127,6 +127,7 @@ Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy 
 | `PAYOUT_WALLET`, `RESERVE_SOL` | treasury address for the scheduled sweep and the hot-wallet reserve |
 | `LAUNCHES_PER_HOUR_PER_IP` | launch rate limit |
 | `PHOTO_MAX_KB` | max size of an uploaded face photo |
+| `BUYBACK_WALLET` | public address of the buyback wallet; the `BUYBACK_SECRET_KEY` secret must belong to it |
 | `BUYBACK_MINT` | the main token bought back; empty = buyback off |
 | `BUYBACK_SHARE` | share of the swept income sent to the buyback wallet (0 to 1) |
 | `BUYBACK_MODE` | `burn` the bought tokens or `hold` them in the buyback wallet |

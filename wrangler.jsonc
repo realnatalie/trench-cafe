@@ -25,6 +25,7 @@
     "RESERVE_SOL": "0.08",
     "LAUNCHES_PER_HOUR_PER_IP": "2",
     "PHOTO_MAX_KB": "220",
+    "BUYBACK_WALLET": "6tmPnY3uPsYXCebBGvSDN3SnRdQvpoeboKzfE9jfUwP3",
     "BUYBACK_MINT": "",
     "BUYBACK_SHARE": "0.5",
     "BUYBACK_MODE": "burn",
