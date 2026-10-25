@@ -39,7 +39,19 @@ Share cards (Solana card, arcade grade, coin, invite pass, the link preview `pub
 * **WebSocket room**: players send `hello`, `p` (position), `say`, `emote`; the room broadcasts presence, chat, launches, trades, prices, boosts, plates, league updates, arcade highlights and megaphone shouts.
 * **Launches**: the player pays the launch fee; the server verifies the transfer on chain, creates the coin through PumpPortal with a fresh mint keypair, seats it at a desk and starts streaming its trades. A pending launch survives restarts and is finished or recovered on the next wake.
 * **Payments**: `checkPayment(sig, sol, from?)` reads the transaction from Solana (with RPC fallbacks), checks the receiver and the amount, and refuses reused signatures.
-* **Scheduled job** (every 10 minutes): finish pending launches, recover orphans, claim creator fees, sweep the hot wallet above the reserve to the treasury.
+* **Scheduled job** (every 10 minutes): finish pending launches, recover orphans, claim creator fees, sweep the hot wallet above the reserve (the buyback share to the buyback wallet, the rest to the treasury), then one buyback step.
+
+## Buyback
+
+```
+creator fees + site payments ─▶ hot wallet ─(sweep)─▶ BUYBACK_SHARE ─▶ buyback wallet ─▶ market buy ─▶ burn
+                                                    └─▶ the rest ─▶ treasury
+```
+
+* Off until `BUYBACK_MINT` and the `BUYBACK_SECRET_KEY` secret are set. With `BUYBACK_FROM=all` the site's payments are addressed to the hot wallet so they can be split; payments addressed to the old receiver are still accepted.
+* Each step buys between 55% and 100% of `min(balance, BUYBACK_MAX_SOL)` through PumpPortal (bonding curve or AMM, chosen automatically), and skips about a third of the runs at random while the wallet is small, so there is no fixed schedule to trade against.
+* With `BUYBACK_MODE=burn` everything the wallet holds of the token is burned right after the buy (SPL Burn, works for Token and Token-2022).
+* `GET /api/buyback` and the `buyback` socket event feed the weekly board and the town.
 
 ### Feature modules
 
@@ -53,6 +65,7 @@ Each installs methods onto `Cafe.prototype`:
 | `league.js` | the weekly Trench League: backing, peaks, settlement, champions, royalties |
 | `ref.js` | invite codes, joins, weekly recruiter table |
 | `bank.js` | daily streak, daily tasks, chip prices for boosts and plates, megaphone, espresso |
+| `buyback.js` | buyback robot: sweep split, randomised market buys of the main token, burn, public stats |
 
 ## The chip economy
 

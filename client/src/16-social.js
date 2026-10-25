@@ -309,6 +309,31 @@ document.addEventListener('click', e => {
   if (k === 'arcade' || k === 'casino') walkTo(k); else if (k === 'album') openAlbum(); else if (k === 'invite') openInvite(); else if (k === 'share') openInvite();
 });
 
+/* ================= buyback: part of the cafe's income buys the main token back (and burns it) ================= */
+const BBK = { v: null, at: 0 };
+async function buybackFetch(force) {
+  if (!NET.http || (!force && Date.now() - BBK.at < 180e3)) return BBK.v;
+  BBK.at = Date.now(); try { const r = await fetch(NET.http + '/api/buyback'); if (r.ok) BBK.v = await r.json(); } catch (e) { }
+  return BBK.v;
+}
+function tokAmt(raw, dec) {
+  let n = 0; try { n = Number(BigInt(raw || '0')) / Math.pow(10, dec ?? 6); } catch (e) { }
+  return n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n));
+}
+const bbSym = () => (NET.cfg && NET.cfg.payToken && BBK.v && NET.cfg.payToken.mint === BBK.v.mint && NET.cfg.payToken.symbol ? '$' + NET.cfg.payToken.symbol : t('bb_token'));
+function buybackHTML() {
+  const v = BBK.v; if (!v || !v.on) return '';
+  const burn = v.mode === 'burn', solscan = s => 'https://solscan.io/tx/' + encodeURIComponent(s);
+  return `<div class="bb-box"><div class="bb-h"><b>🔥 ${t(burn ? 'bb_title' : 'bb_title_hold')}</b><span>${t('bb_sub', { p: Math.round(v.share * 100), s: bbSym() })}${burn ? t('bb_burn_tail') : ''}</span></div>
+    <div class="inv-stats"><div><small>${t('bb_spent')}</small><b>${(+v.sol || 0).toFixed(2)} SOL</b></div><div><small>${t('bb_bought')}</small><b>${tokAmt(v.bought, v.decimals)}</b></div><div><small>${t(burn ? 'bb_burned' : 'bb_held')}</small><b>${tokAmt(burn ? v.burned : v.bought, v.decimals)}</b></div></div>
+    ${v.buys && v.buys.length ? `<ul class="bk-log">${v.buys.slice(0, 5).map(b => `<li><span><a href="${solscan(b.sig)}" target="_blank" rel="noopener">${(+b.sol).toFixed(3)} SOL → ${tokAmt(b.bought, v.decimals)}</a></span><small>${ago(b.at)}</small><b>${b.burnSig ? '🔥' : ''}</b></li>`).join('')}</ul>` : ''}
+    <p class="muted bb-wallet">${t('bb_wallet')}: <a href="https://solscan.io/account/${esc(v.wallet)}" target="_blank" rel="noopener">${esc(shortW(v.wallet))}</a></p></div>`;
+}
+function onBuyback(m) {
+  toast(t('bb_toast', { s: (+m.sol || 0).toFixed(3), n: tokAmt(m.bought, m.decimals), t: bbSym() }), 'gold', true); sfx('coin');
+  buybackFetch(true).then(() => { if ($('#mWeek') && !$('#mWeek').hidden) openWeek(true); });
+}
+
 /* ================= the weekly board: launches, arcade runs, recruiters ================= */
 function weekCols() {
   const coins = LG.view ? LG.view.coins.filter(c => c.peak > 0 || c.trades > 0 || c.pool > 0) : [];
@@ -344,6 +369,7 @@ function drawWeekBoard() {
   const champ = LG.view && LG.view.champs && LG.view.champs[0];
   x.fillStyle = '#8a877f'; x.font = `600 17px ${MONO}`; x.textAlign = 'left';
   x.fillText(champ ? t('wk_champ', { s: champ.sym, m: fmtUsd(champ.peak) }) : t('wk_foot'), 28, 546);
+  const bb = BBK.v; if (bb && bb.on) { x.fillStyle = '#ff9a5a'; x.font = `800 17px ${MONO}`; x.textAlign = 'right'; x.fillText(t(bb.mode === 'burn' ? 'bb_board' : 'bb_board_hold', { s: (+bb.sol || 0).toFixed(2), n: tokAmt(bb.mode === 'burn' ? bb.burned : bb.bought, bb.decimals) }), W - 28, 546); x.textAlign = 'left'; }
   tex.needsUpdate = true;
 }
 function openWeek(fresh) {
@@ -354,10 +380,10 @@ function openWeek(fresh) {
       <div class="wk-col" style="--wc:#8fd3a6"><h4>${t('wk_launch')}</h4>${list(coins, c => { const a = agents.find(q => q.mint === c.mint); return `<button type="button" class="wk-nm" ${a ? `data-agent="${a.id}"` : ''}><img alt="" src="${esc(c.image || TH(c.body))}">$${esc(c.sym)}</button><b>${fmtUsd(c.peak)}</b>`; })}<button type="button" class="btn small hot" data-place-go="launchpad">${t('launch')}</button></div>
       <div class="wk-col" style="--wc:#b98cff"><h4>${t('wk_arcade')}</h4>${list(runs, r => `<span class="wk-nm">${esc(r.n || shortW(r.w))}</span><b>${r.s}</b>`)}<button type="button" class="btn small" data-place-go="arcade">${t('mp_arcade')}</button></div>
       <div class="wk-col" style="--wc:#e9c873"><h4>${t('wk_recruit')}</h4>${list(recs, r => `<span class="wk-nm">${esc(r.nick)}</span><b>+${r.n}</b>`)}<button type="button" class="btn small" data-open-invite>${t('ref_title')}</button></div>
-    </div>`;
+    </div>${buybackHTML()}`;
   showModal('mWeek');
-  const stamp = (LG.at || 0) + ':' + (REF.top ? REF.topAt : 0) + ':' + (RK.top3dAt || 0);
-  if (!fresh) Promise.all([leagueFetch(), refTopFetch()]).then(() => { const now = (LG.at || 0) + ':' + (REF.top ? REF.topAt : 0) + ':' + (RK.top3dAt || 0); if (now !== stamp && !$('#mWeek').hidden) openWeek(true); });
+  const stamp = (LG.at || 0) + ':' + (REF.top ? REF.topAt : 0) + ':' + (RK.top3dAt || 0) + ':' + BBK.at;
+  if (!fresh) Promise.all([leagueFetch(), refTopFetch(), buybackFetch()]).then(() => { const now = (LG.at || 0) + ':' + (REF.top ? REF.topAt : 0) + ':' + (RK.top3dAt || 0); if (now + ':' + BBK.at !== stamp && !$('#mWeek').hidden) openWeek(true); });
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-open-invite]')) openInvite(); });
 
@@ -492,7 +518,7 @@ function socialTick(time) {
   }
   if (!playing) return;
   if (MUS.on && !MUS.tm) musStart();
-  if (time - socAt > 8) { socAt = time; drawWeekBoard(); refTopFetch(); }
+  if (time - socAt > 8) { socAt = time; drawWeekBoard(); refTopFetch(); buybackFetch(); }
   if (Date.now() - socRefAt > 240e3) { socRefAt = Date.now(); refSync(); }
   bankTick();
 }
@@ -504,4 +530,4 @@ async function musLevels(sec = 20, inside = true) {   // test hook: renders the 
   let pk = 0, sum = 0; const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > pk) pk = v; sum += v * v; }
   return { peak: +pk.toFixed(3), rms: +Math.sqrt(sum / d.length).toFixed(4) };
 }
-Object.assign(window.__cc, { LG, musLevels, openBar, openInvite, openShare, openWeek, drawWeekBoard, shDraw, musToggle, refSync, MUS, REF, BAR });
+Object.assign(window.__cc, { BBK, buybackHTML, LG, musLevels, openBar, openInvite, openShare, openWeek, drawWeekBoard, shDraw, musToggle, refSync, MUS, REF, BAR });

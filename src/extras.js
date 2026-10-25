@@ -84,7 +84,7 @@ export function installExtras(Cafe) {
         if (tx) {
           if (tx.meta?.err) return 'bad';
           const bal = (list, owner) => (list || []).filter(b => b.mint === mint && b.owner === owner).reduce((s, b) => s + BigInt(b.uiTokenAmount?.amount || '0'), 0n);
-          const got = bal(tx.meta?.postTokenBalances, this.FEE_RECEIVER) - bal(tx.meta?.preTokenBalances, this.FEE_RECEIVER);
+          const got = this.payReceivers().reduce((s, w) => s + bal(tx.meta?.postTokenBalances, w) - bal(tx.meta?.preTokenBalances, w), 0n);
           const spent = bal(tx.meta?.preTokenBalances, wallet) - bal(tx.meta?.postTokenBalances, wallet);
           const need = BigInt(raw) * 995n / 1000n;
           if (got >= need && spent >= need) { this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, { at: Date.now(), from: wallet }); return 'ok'; }

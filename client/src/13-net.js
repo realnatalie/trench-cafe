@@ -34,6 +34,7 @@ function netHandle(m) {
     case 'emote': { const r = NET.remote.get(m.id); if (r) r.av.emote(); break; }
     case 'arcade': { toast(t('rk_perfect', { w: shortW(m.wallet), g: rkName(m.game) }), 'gold'); RK.top3dAt = 0; break; }
     case 'shout': { showShout(m); break; }
+    case 'buyback': { onBuyback(m); break; }
     case 'plate': { const a = agents.find(x => x.mint === m.mint); if (a) { a.plate = String(m.text || '').slice(0, 24); if (a.booth) { applyBoothStage(a.booth); drawScreen(a.booth); } } break; }
     case 'boost': { NET.boosts = NET.boosts || {}; NET.boosts[m.mint] = m.until; const a = agents.find(x => x.mint === m.mint); if (a) { setFeatured(a, true); toast(t('boost_live', { s: '$' + a.sym }), 'gold', true); updateAgentTag(a); } break; }
     case 'launch': if (m.agent && m.agent.mint && m.agent.sym !== NET.launching && launchPaid() && (launchPaid().sym === m.agent.sym || (NET.wallet && m.agent.wallet === NET.wallet))) { pendingLaunchDone(m.agent); break; }

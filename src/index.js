@@ -11,6 +11,7 @@ import { installHunt } from './hunt.js';
 import { installLeague } from './league.js';
 import { installRef } from './ref.js';
 import { installBank } from './bank.js';
+import { installBuyback, splitSweep } from './buyback.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
@@ -58,7 +59,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
-    this.extrasInit(env); this.arcadeInit(env);
+    this.extrasInit(env); this.arcadeInit(env); this.buybackInit(env);
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
     this.players = new Map(); this.nextId = 1; this.NONCES = new Map(); this.usedSigs = new Set(); this.hitLog = new Map(); this.launchLog = new Map();
     this.PX = {}; this.OHLC = {}; this.SOL_USD = 0; this.ohlcIdx = 0; this.TRADES = {}; this.txQueue = []; this.ppWs = null; this.ppSubscribed = ''; this.psTick = 0; this.timer = null; this.lastPx = 0;
@@ -218,8 +219,9 @@ export class Cafe extends DurableObject {
       if (url.pathname === '/api/league' || url.pathname.startsWith('/api/league/')) return await this.leagueHandle(req, url, ip);
       if (url.pathname.startsWith('/api/ref/')) return await this.refHandle(req, url, ip);
       if (url.pathname.startsWith('/api/bank/')) return await this.bankHandle(req, url, ip);
+      if (url.pathname === '/api/buyback') return await this.buybackHandle(req, url);
       if (url.pathname === '/api/quote' || url.pathname === '/api/items' || url.pathname === '/api/buy' || url.pathname === '/api/plate' || url.pathname === '/api/pro' || url.pathname.startsWith('/api/casino/')) return await this.handleExtras(req, url, ip);
-      if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); return json(200, { ok: true }); }
+      if (req.method === 'POST' && url.pathname === '/internal/claim') { await this.finishPending(); await this.recoverOrphans(); await this.claimCreatorFees(); await this.sweepToPayout(); await this.buybackRun(); return json(200, { ok: true }); }
       return new Response('not found', { status: 404 });
     } catch (e) { this.log('[http] error', e.message); return json(500, { error: e.message }); }
   }
@@ -496,7 +498,7 @@ export class Cafe extends DurableObject {
         if (tx) {
           if (tx.meta?.err) return 'bad';
           const ixs = tx.transaction?.message?.instructions || [];
-          const hit = ixs.find(ix => ix.parsed?.type === 'transfer' && ix.parsed.info.destination === this.FEE_RECEIVER && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
+          const hit = ixs.find(ix => ix.parsed?.type === 'transfer' && this.payReceivers().includes(ix.parsed.info.destination) && +ix.parsed.info.lamports >= Math.round(amountSol * 1e9 * 0.98) && (!from || ix.parsed.info.source === from));
           if (!hit) return 'bad';
           if (this.usedSigs.has(sig) || await this.ctx.storage.get('sig:' + sig)) return 'used';
           this.usedSigs.add(sig); await this.ctx.storage.put('sig:' + sig, { at: Date.now(), from: hit.parsed.info.source });
@@ -508,16 +510,21 @@ export class Cafe extends DurableObject {
     } finally { this.payBusy.delete(sig); }
   }
   async verifyPayment(sig, amountSol = this.LAUNCH_FEE_SOL, from = null) { return (await this.checkPayment(sig, amountSol, from)) === 'ok'; }
-  async sweepToPayout() {
+  async sweepToPayout() {   // everything above the reserve leaves the hot wallet: the buyback share to the buyback wallet, the rest to the payout wallet
     if (!this.OWNER || !this.PAYOUT_WALLET || this.PAYOUT_WALLET === this.OWNER_PUBKEY) return;
     try {
       const bal = await this.conn.getBalance(this.OWNER.publicKey); const send = bal - Math.round(this.RESERVE_SOL * 1e9) - 10000;
       if (send < 0.01 * 1e9) return;
-      const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: this.OWNER.publicKey, toPubkey: new PublicKey(this.PAYOUT_WALLET), lamports: send }));
+      const part = this.buybackOn() ? splitSweep(send, this.BB.share) : { buyback: 0, payout: send };
+      const tx = new Transaction();
+      if (part.buyback > 0) tx.add(SystemProgram.transfer({ fromPubkey: this.OWNER.publicKey, toPubkey: this.BB.key.publicKey, lamports: part.buyback }));
+      if (part.payout > 0) tx.add(SystemProgram.transfer({ fromPubkey: this.OWNER.publicKey, toPubkey: new PublicKey(this.PAYOUT_WALLET), lamports: part.payout }));
       tx.feePayer = this.OWNER.publicKey; tx.recentBlockhash = (await this.rpcJson('getLatestBlockhash', [{ commitment: 'confirmed' }])).value.blockhash; tx.sign(this.OWNER); const sig = bs58.encode(tx.signature); await this.rpcJson('sendTransaction', [bytesToB64(tx.serialize()), { encoding: 'base64' }]);
-      this.log('[sweep]', (send / 1e9).toFixed(4), 'SOL ->', this.PAYOUT_WALLET, sig);
+      if (part.buyback > 0) { const st = await this.buybackStats(); st.fed = Math.round(((st.fed || 0) + part.buyback / 1e9) * 1e4) / 1e4; await this.ctx.storage.put('buyback:stats', st); }
+      this.log('[sweep]', (part.payout / 1e9).toFixed(4), 'SOL ->', this.PAYOUT_WALLET, part.buyback ? '| ' + (part.buyback / 1e9).toFixed(4) + ' SOL -> buyback' : '', sig);
     } catch (e) { this.log('[sweep] error', e.message); }
   }
+
 }
 installExtras(Cafe);
 installArcade(Cafe);
@@ -525,3 +532,4 @@ installHunt(Cafe);
 installLeague(Cafe);
 installRef(Cafe);
 installBank(Cafe);
+installBuyback(Cafe);

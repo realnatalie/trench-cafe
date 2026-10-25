@@ -72,3 +72,4 @@ Server → client: `welcome`, `online`, `ps` (players), `leave`, `say`, `emote`,
 | POST | `/api/league/back` | `{ mint, chips }` |
 | POST | `/api/ref/me`, `/api/ref/join`, `/api/ref/collect` | invite pass |
 | GET | `/api/ref/top` | this week's recruiters |
+| GET | `/api/buyback` | buyback status: wallet, SOL spent, tokens bought and burned, latest buys |

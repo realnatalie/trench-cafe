@@ -20,6 +20,7 @@ Live: **https://clout-cafe.fkamilev102.workers.dev**
 | **Trench League** | Every coin launched here is in a weekly league. Back coins with chips; the highest peak market cap of the week wins the pool. |
 | **Exploration** | 36 Solana story cards with their own art, daily chip crates, green candles, a card album with rarities. |
 | **Progression** | Levels and titles, XP from everything, a daily tracker, a minimap, a hotbar. |
+| **Buyback** | A share of the cafe's income buys the main token back on the open market from a dedicated wallet, in small randomised buys, then burns it. Every buy is shown in town with a Solscan link. |
 | **Social** | Invite pass with a personal link, share-to-X pictures generated in the browser, a weekly board in the town square, a generative lo-fi soundtrack with room ambience. |
 | **Five languages** | English, 中文, 日本語, 한국어, Español. |
 
@@ -106,6 +107,7 @@ Real launches need two secrets (never commit them):
 ```bash
 npx wrangler secret put OWNER_SECRET_KEY   # base58 key of a fresh hot wallet used by the server
 npx wrangler secret put RPC_URL            # a mainnet RPC URL, e.g. Helius
+npx wrangler secret put BUYBACK_SECRET_KEY # optional: a separate wallet used only by the buyback robot
 ```
 
 Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy `.dev.vars.example` to `.dev.vars`.
@@ -125,6 +127,11 @@ Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy 
 | `PAYOUT_WALLET`, `RESERVE_SOL` | treasury address for the scheduled sweep and the hot-wallet reserve |
 | `LAUNCHES_PER_HOUR_PER_IP` | launch rate limit |
 | `PHOTO_MAX_KB` | max size of an uploaded face photo |
+| `BUYBACK_MINT` | the main token bought back; empty = buyback off |
+| `BUYBACK_SHARE` | share of the swept income sent to the buyback wallet (0 to 1) |
+| `BUYBACK_MODE` | `burn` the bought tokens or `hold` them in the buyback wallet |
+| `BUYBACK_FROM` | `all` = creator fees and site payments, `fees` = creator fees only |
+| `BUYBACK_MAX_SOL`, `BUYBACK_SLIPPAGE` | cap per buy, max slippage in percent |
 
 `SITE_URL` (environment variable for `npm run build`) sets the absolute address used in link previews.
 
