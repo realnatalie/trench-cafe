@@ -285,6 +285,14 @@ export class Cafe extends DurableObject {
   webSocketError(ws) { this.drop(ws); try { ws.close(); } catch (e) { } }
   drop(ws) { const me = this.players.get(ws); this.players.delete(ws); if (me) this.broadcast({ t: 'leave', id: me.id, online: this.players.size }); if (!this.players.size) this.stopLoop(); }
   broadcast(obj, except) { const s = JSON.stringify(obj); for (const ws of this.ctx.getWebSockets()) { if (ws === except) continue; try { ws.send(s); } catch (e) { this.players.delete(ws); } } }
+  /* every 5 s: players whose socket is gone (a closed tab the runtime never reported) leave the room for everyone */
+  pruneGhosts() {
+    const live = new Set(this.ctx.getWebSockets());
+    for (const [ws, me] of this.players) {
+      if (live.has(ws) && ws.readyState === 1) continue;
+      this.players.delete(ws); this.broadcast({ t: 'leave', id: me.id, online: this.players.size });
+    }
+  }
   /* Positions, five times a second, to the players who can see them: the town is cut into cells, each player hears about the
      players in the 3x3 cells around their own (nearest PC_CAP first), in a compact array form. Everyone in a cell shares one
      message, so a full room costs one JSON string per busy cell instead of one huge list per player. */
@@ -318,6 +326,7 @@ export class Cafe extends DurableObject {
   tick() {
     if (!this.players.size) return this.stopLoop();
     this.psTick++;
+    if (this.psTick % 25 === 0) this.pruneGhosts();
     this.sendPositions(this.psTick % 25 === 0);
     if (this.psTick % 3 === 0 && this.txQueue.length) { const l = this.txQueue.splice(0, 40); this.txQueue.length = 0; this.broadcast({ t: 'tx', list: l }); }
     if (this.psTick % 150 === 0) { this.pollPrices(); if (!this.ppWs && this.agents.some(a => a.mint)) this.ppConnect(); }
