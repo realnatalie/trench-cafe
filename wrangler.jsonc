@@ -31,6 +31,7 @@
     "BUYBACK_MODE": "burn",
     "BUYBACK_FROM": "all",
     "BUYBACK_MAX_SOL": "0.25",
-    "BUYBACK_SLIPPAGE": "10"
+    "BUYBACK_SLIPPAGE": "10",
+    "HIDE_MINTS": "3twhkm1SvGMYXMcQbgwYzLeqhXZwkM8TxNpUb21oTS3D"
   }
 }

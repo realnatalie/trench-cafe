@@ -133,6 +133,7 @@ Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy 
 | `BUYBACK_MODE` | `burn` the bought tokens or `hold` them in the buyback wallet |
 | `BUYBACK_FROM` | `all` = creator fees and site payments, `fees` = creator fees only |
 | `BUYBACK_MAX_SOL`, `BUYBACK_SLIPPAGE` | cap per buy, max slippage in percent |
+| `HIDE_MINTS` | comma-separated mints taken off the floor (test coins); removed from the room on the next start |
 
 `SITE_URL` (environment variable for `npm run build`) sets the absolute address used in link previews.
 

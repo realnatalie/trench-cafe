@@ -38,6 +38,7 @@ export default {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/og.png') return env.ASSETS.fetch(req);
+    if (url.pathname.startsWith('/internal/')) return new Response('not found', { status: 404 });   // only the scheduled job talks to the room's internal routes
     return env.CAFE.get(env.CAFE.idFromName('main')).fetch(req);
   },
   async scheduled(ev, env, ctx) {
@@ -60,6 +61,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
+    this.HIDE_MINTS = new Set(String(env.HIDE_MINTS || '').split(',').map(x => x.trim()).filter(Boolean));
     this.extrasInit(env); this.arcadeInit(env); this.buybackInit(env);
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
     this.players = new Map(); this.nextId = 1; this.NONCES = new Map(); this.usedSigs = new Set(); this.hitLog = new Map(); this.launchLog = new Map();
@@ -68,7 +70,10 @@ export class Cafe extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       const st = this.ctx.storage;
       const ag = await st.list({ prefix: 'a:' }); this.agents = [...ag.values()].sort((a, b) => a.at - b.at);
+      for (const a of this.agents.filter(a => this.HIDE_MINTS.has(a.mint))) await st.delete('a:' + String(a.at).padStart(14, '0'));   // test coins taken off the floor
+      this.agents = this.agents.filter(a => !this.HIDE_MINTS.has(a.mint));
       this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {}; await this.extrasLoad(); await this.leagueLoad();
+      if (this.HIDE_MINTS.size) { let ch = false; for (const m of this.HIDE_MINTS) { if (this.LG && this.LG.coins && this.LG.coins[m]) { delete this.LG.coins[m]; ch = true; } if (this.boosts[m]) { delete this.boosts[m]; await st.put('boosts', this.boosts); } } if (ch) await st.put('league:cur', this.LG); }
       const su = await st.get('solusd'); if (su && su.usd > 0 && Date.now() - su.at < 6 * 3600e3) this.SOL_USD = su.usd;   // the last known SOL price survives a restart
       const now = Date.now(); let pruned = false; for (const k in this.sessions) if (now - this.sessions[k].at > 90 * 86400e3) { delete this.sessions[k]; pruned = true; } if (pruned) await st.put('sessions', this.sessions);
     });
@@ -479,7 +484,7 @@ export class Cafe extends DurableObject {
         const logs = (tx.meta?.logMessages || []).join('\n'); if (!/Instruction: Create/.test(logs)) continue;
         const keys = tx.transaction?.message?.accountKeys || [];
         const mintKey = keys.find(k => k.signer && k.pubkey !== this.OWNER_PUBKEY); if (!mintKey) continue;
-        const mint = mintKey.pubkey; if (this.agents.some(a => a.mint === mint)) continue;
+        const mint = mintKey.pubkey; if (this.agents.some(a => a.mint === mint) || this.HIDE_MINTS.has(mint)) continue;
         const ix = (tx.transaction?.message?.instructions || []).find(i => i.programId === PUMP && i.data); if (!ix) continue;
         let name = '', symbol = '', uri = '';
         try { const d = bs58.decode(ix.data); let o = 8; const str = () => { const n = d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) | (d[o + 3] << 24); o += 4; const v = new TextDecoder().decode(d.slice(o, o + n)); o += n; return v; }; name = str(); symbol = str(); uri = str(); } catch (e) { continue; }
