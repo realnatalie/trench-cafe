@@ -14,6 +14,7 @@ import { installBank } from './bank.js';
 import { installBuyback, splitSweep } from './buyback.js';
 
 const PUMPPORTAL = 'https://pumpportal.fun/api/trade-local';
+const PC_STATES = ['idle', 'walk', 'run', 'jump', 'sit', 'dance', 'sleep', 'swim'], PC_CAP = 60;   // compact position states, same order as the client
 const RECOVER_SINCE = Date.parse('2026-10-12T00:00:00Z');   // only coins the cafe made: older coins of the same wallet are left out
 const LOOK_KEYS = ['base', 'emote', 'photo', 'body', 'build', 'skin', 'hair', 'hairCol', 'eyes', 'acc', 'top', 'topCol', 'pants', 'shoes', 'accent'];
 const RPC_ALLOWED = new Set(['getBalance', 'getLatestBlockhash', 'getSignatureStatuses', 'getTokenAccountsByOwner', 'getParsedTokenAccountsByOwner', 'getTokenAccountBalance', 'sendTransaction', 'simulateTransaction', 'getAccountInfo', 'getTransaction', 'getMinimumBalanceForRentExemption', 'getRecentPrioritizationFees', 'getBlockHeight', 'getSlot', 'getMultipleAccounts']);
@@ -265,7 +266,7 @@ export class Cafe extends DurableObject {
   webSocketMessage(ws, raw) {
     let me = this.players.get(ws); if (!me) { me = ws.deserializeAttachment(); if (!me) return; this.players.set(ws, me); }
     if (typeof raw !== 'string' || raw.length > 1500) return;
-    const now = Date.now(); if (now - (me._w || 0) > 1000) { me._w = now; me._n = 0; } if (++me._n > 40) return;
+    const now = Date.now(); if (now - (me._w || 0) > 1000) { me._w = now; me._n = 0; } if (++me._n > 12) return;   // a client sends at most 5 positions a second
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (m.t === 'hello') {
       me.c = String(m.c || 'degen').slice(0, 16); me.n = cleanNick(String(m.n || 'player').replace(/[<>&"']/g, '').slice(0, 16)) || 'player';
@@ -277,13 +278,36 @@ export class Cafe extends DurableObject {
       this.broadcast({ t: 'ps', list: [this.pub(me)] }, ws);
     }
     else if (m.t === 'p') { if (typeof m.x === 'number' && typeof m.z === 'number') { me.x = m.x; me.z = m.z; me.ry = +m.ry || 0; me.st = String(m.st || 'idle').slice(0, 8); } }
-    else if (m.t === 'say') { const text = String(m.text || '').replace(/https?:\/\/\S+/g, '').slice(0, 80).trim(); if (text) this.broadcast({ t: 'say', id: me.id, text }, ws); }
-    else if (m.t === 'emote') this.broadcast({ t: 'emote', id: me.id }, ws);
+    else if (m.t === 'say') { if (now - (me._say || 0) < 1500) return; me._say = now; const text = String(m.text || '').replace(/https?:\/\/\S+/g, '').slice(0, 80).trim(); if (text) this.broadcast({ t: 'say', id: me.id, text }, ws); }
+    else if (m.t === 'emote') { if (now - (me._emo || 0) < 1000) return; me._emo = now; this.broadcast({ t: 'emote', id: me.id }, ws); }
   }
   webSocketClose(ws) { this.drop(ws); try { ws.close(); } catch (e) { } }
   webSocketError(ws) { this.drop(ws); try { ws.close(); } catch (e) { } }
   drop(ws) { const me = this.players.get(ws); this.players.delete(ws); if (me) this.broadcast({ t: 'leave', id: me.id, online: this.players.size }); if (!this.players.size) this.stopLoop(); }
   broadcast(obj, except) { const s = JSON.stringify(obj); for (const ws of this.ctx.getWebSockets()) { if (ws === except) continue; try { ws.send(s); } catch (e) { this.players.delete(ws); } } }
+  /* Positions, five times a second, to the players who can see them: the town is cut into cells, each player hears about the
+     players in the 3x3 cells around their own (nearest PC_CAP first), in a compact array form. Everyone in a cell shares one
+     message, so a full room costs one JSON string per busy cell instead of one huge list per player. */
+  sendPositions(full) {
+    const CELL = 18, cells = new Map(), key = (cx, cz) => cx + ',' + cz;
+    for (const [ws, p] of this.players) {
+      if (typeof p.x !== 'number') continue;
+      const sig = p.x + '|' + p.z + '|' + p.ry + '|' + p.st, moved = sig !== p._sig; p._sig = sig;
+      const cx = Math.floor(p.x / CELL), cz = Math.floor(p.z / CELL), k = key(cx, cz);
+      let c = cells.get(k); if (!c) cells.set(k, c = { cx, cz, members: [], ws: [] });
+      c.members.push({ p, moved, row: [+String(p.id).slice(1) || 0, Math.round(p.x * 10), Math.round(p.z * 10), Math.round((p.ry || 0) * 100), Math.max(0, PC_STATES.indexOf(p.st))] });
+      c.ws.push(ws);
+    }
+    const on = this.players.size;
+    for (const c of cells.values()) {
+      const near = []; for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const n = cells.get(key(c.cx + dx, c.cz + dz)); if (n) near.push(...n.members); }
+      let pick = near.filter(m => full || m.moved);
+      if (!pick.length) continue;
+      if (pick.length > PC_CAP) { const mx = (c.cx + 0.5) * CELL, mz = (c.cz + 0.5) * CELL; pick = pick.map(m => ({ m, d: (m.p.x - mx) ** 2 + (m.p.z - mz) ** 2 })).sort((a, b) => a.d - b.d).slice(0, PC_CAP).map(o => o.m); }
+      const s = JSON.stringify({ t: 'pc', l: pick.map(m => m.row), on });
+      for (const ws of c.ws) { try { ws.send(s); } catch (e) { this.players.delete(ws); } }
+    }
+  }
   startLoop() {
     if (this.timer) return;
     this.timer = setInterval(() => this.tick(), 200);
@@ -294,8 +318,7 @@ export class Cafe extends DurableObject {
   tick() {
     if (!this.players.size) return this.stopLoop();
     this.psTick++;
-    const list = []; for (const p of this.players.values()) { const sig = p.x + '|' + p.z + '|' + p.ry + '|' + p.st; if (sig !== p._sig || this.psTick % 25 === 0) { p._sig = sig; list.push({ id: p.id, c: p.c, x: p.x, z: p.z, ry: p.ry, st: p.st, vip: p.vip || undefined }); } }
-    if (list.length) this.broadcast({ t: 'ps', list, online: this.players.size });
+    this.sendPositions(this.psTick % 25 === 0);
     if (this.psTick % 3 === 0 && this.txQueue.length) { const l = this.txQueue.splice(0, 40); this.txQueue.length = 0; this.broadcast({ t: 'tx', list: l }); }
     if (this.psTick % 150 === 0) { this.pollPrices(); if (!this.ppWs && this.agents.some(a => a.mint)) this.ppConnect(); }
     if (this.psTick % 300 === 10) this.pollSol();

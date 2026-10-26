@@ -171,14 +171,14 @@ function drawMinimap(time) {
   }
   for (const k of HUNT_LIVE) { if (k.claimed || !k.g.visible) continue; const [p, q] = mapXY(k.x, k.z, W, H), s = 6 + Math.sin(time * 4) * 1.5; x.fillStyle = '#f1dca4'; x.fillRect(p - s / 2, q - s / 2, s, s); x.strokeStyle = '#0b0b0d'; x.lineWidth = 1.5; x.strokeRect(p - s / 2, q - s / 2, s, s); }
   x.fillStyle = 'rgba(111,179,255,.9)';
-  for (const r of NET.remote.values()) { const o = r.av.obj.position, [p, q] = mapXY(o.x, o.z, W, H); x.beginPath(); x.arc(p, q, 3.2, 0, 7); x.fill(); }
+  for (const r of NET.remote.values()) { if (performance.now() - r.seen > 4000) continue; const [p, q] = mapXY(r.tx, r.tz, W, H); x.beginPath(); x.arc(p, q, 3.2, 0, 7); x.fill(); }
   const o = player.obj.position, [p, q] = mapXY(o.x, o.z, W, H), ry = player.obj.rotation.y, dx = Math.sin(ry), dz = Math.cos(ry);
   x.save(); x.translate(p, q); x.rotate(Math.atan2(dz, dx) - Math.PI / 2);
   x.fillStyle = 'rgba(233,200,115,.18)'; x.beginPath(); x.arc(0, 0, 18 + Math.sin(time * 3) * 2, 0, 7); x.fill();
   x.fillStyle = '#ffffff'; x.strokeStyle = '#0b0b0d'; x.lineWidth = 2.5; x.beginPath(); x.moveTo(0, 12); x.lineTo(8, -7); x.lineTo(0, -3); x.lineTo(-8, -7); x.closePath(); x.stroke(); x.fill();
   x.restore();
   const z = $('#gZone'); if (z) z.textContent = isInside(o) ? 'TRENCH CAFE' : 'TOWN';
-  const on = $('#gOnline'); if (on) on.innerHTML = `<i></i>${t('gui_online', { n: NET.remote.size + 1 })}`;
+  const on = $('#gOnline'); if (on) on.innerHTML = `<i></i>${t('gui_online', { n: Math.max(NET.online || 1, NET.remote.size + 1) })}`;
 }
 function guiMapClick(ev) {
   const c = $('#gMapC'), r = c.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * c.width, sy = (ev.clientY - r.top) / r.height * c.height;

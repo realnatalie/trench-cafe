@@ -898,7 +898,7 @@ function frame() {
   const TAG_D = TOUCH ? 12 : 15;
   for (const b of booths) if (b.avatar) placeTag(b.avatar.tag, _w.copy(b.avatar.obj.position).setY(b.avatar.obj.position.y + (b.avatar.state === 'sit' || b.avatar.state === 'sleep' ? b.avatar.tagH - 0.35 : b.avatar.tagH * (b.agent?.outside ? outsideScale(b.agent) : 1) + 0.1)), showTags ? (b.avatar.tag.lastElementChild && b.avatar.tag.lastElementChild.classList.contains('bubble') ? 26 : TAG_D) : 0);
   for (const n of npcs) placeTag(n.tag, _w.copy(n.obj.position).setY(n.tagH), showTags ? (TOUCH ? 11 : 14) : 0);
-  for (const r of NET.remote.values()) if (r.av.obj.visible) placeTag(r.av.tag, _w.copy(r.av.obj.position).setY(r.av.tagH), showTags ? 30 : 0);
+  for (const r of NET.remote.values()) if (r.av && r.av.obj.visible) placeTag(r.av.tag, _w.copy(r.av.obj.position).setY(r.av.tagH), showTags ? 30 : 0);
   if (player) placeTag(player.tag, _w.copy(player.obj.position).setY(player.obj.position.y + player.tagH), camMode === 'play' ? 99 : 0);
   for (let i = 0; i < 3; i++) { screenRR = (screenRR + 1) % booths.length; drawScreen(booths[screenRR]); }
   if (time - (townFx.bigAt || 0) > 1 && introPhase !== 'boot') { townFx.bigAt = time; if (townFx.bigLight) townFx.bigLight.intensity = featured && Date.now() - featuredAt < 20 * 60e3 ? 26 + Math.sin(time * 3) * 6 : 14; }

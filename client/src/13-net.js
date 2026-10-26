@@ -6,7 +6,7 @@ function netConnect() {
   try { NET.ws = new WebSocket(NET.url); } catch (e) { return; }
   NET.ws.onopen = () => { NET.ready = true; netHello(); };
   NET.ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } netHandle(m); };
-  NET.ws.onclose = () => { NET.ready = false; NET.ws = null; for (const r of NET.remote.values()) r.av.dispose(); NET.remote.clear(); setTimeout(netConnect, 3000); };
+  NET.ws.onclose = () => { NET.ready = false; NET.ws = null; for (const r of NET.remote.values()) if (r.av) r.av.dispose(); NET.remote.clear(); setTimeout(netConnect, 3000); };
   NET.ws.onerror = () => { };
 }
 async function netHello() {
@@ -29,9 +29,14 @@ function netHandle(m) {
       booths.forEach(drawScreen); drawWorldScreens(time); if (!$('#land').hidden) renderLand(); setTimeout(retryPendingVip, 2000); break;
     }
     case 'ps': (m.list || []).forEach(netUpsert); if (m.online) NET.online = m.online; break;
-    case 'leave': { const r = NET.remote.get(m.id); if (r) { r.av.dispose(); NET.remote.delete(m.id); } if (m.online) NET.online = m.online; break; }
-    case 'say': { const r = NET.remote.get(m.id); if (r) r.av.say(String(m.text).slice(0, 80)); break; }
-    case 'emote': { const r = NET.remote.get(m.id); if (r) r.av.emote(); break; }
+    case 'pc': {   // compact positions of the players near you: [id number, x*10, z*10, ry*100, state]
+      const now = performance.now();
+      for (const q of m.l || []) { const r = NET.remote.get('p' + q[0]); if (!r) continue; r.tx = q[1] / 10; r.tz = q[2] / 10; r.ry = q[3] / 100; r.st = PC_STATES[q[4]] || 'idle'; r.seen = now; }
+      if (m.on) NET.online = m.on; break;
+    }
+    case 'leave': { const r = NET.remote.get(m.id); if (r) { if (r.av) r.av.dispose(); NET.remote.delete(m.id); } if (m.online) NET.online = m.online; break; }
+    case 'say': { const r = NET.remote.get(m.id); if (r && r.av) r.av.say(String(m.text).slice(0, 80)); break; }
+    case 'emote': { const r = NET.remote.get(m.id); if (r && r.av) r.av.emote(); break; }
     case 'arcade': { toast(t('rk_perfect', { w: shortW(m.wallet), g: rkName(m.game) }), 'gold'); RK.top3dAt = 0; break; }
     case 'shout': { showShout(m); break; }
     case 'buyback': { onBuyback(m); break; }
@@ -51,22 +56,33 @@ function netHandle(m) {
   }
   const el = $('#onlineChip'); if (el) { el.hidden = false; el.textContent = NET.online + ' online'; } const ln = $('#landN'); if (ln) ln.textContent = NET.online;
 }
+/* Remote players are kept as data; their 3D model is only built when they come near (a few per frame), and dropped again
+   after a while out of sight. A crowded room costs a list entry per player, not a full character each. */
+const PC_STATES = ['idle', 'walk', 'run', 'jump', 'sit', 'dance', 'sleep', 'swim'];
 function netUpsert(p) {
   if (!p) return;
   if (p.id === NET.id) { if (p.vip && !NET.vip) { NET.vip = true; if (player) player.tag.classList.add('vip'); toast(t('vip_done'), 'gold'); } return; }
   let r = NET.remote.get(p.id);
-  if (!r) {
-    const look = p.c === 'custom' ? sanitizeLook({ ...(p.look || {}), photo: '' }) : null;
-    const av = new Avatar(CHAR[p.c] && !CHAR[p.c].npc ? p.c : 'degen', { cls: 'npc', look }); av.tag.innerHTML = `<b>${esc(String(p.n || p.c || 'player').slice(0, 16))}</b>`; av.obj.position.set(p.x || 0, 0, p.z || 20);
-    r = { av, tx: p.x || 0, tz: p.z || 20, ry: p.ry || 0, st: 'idle', c: p.c, lk: JSON.stringify(look) }; NET.remote.set(p.id, r);
-    if (Array.isArray(p.fl)) { applyFlair(av.obj, p.fl); r.fl = p.fl.join(','); }
-  } else if (p.c && CHAR[p.c] && (p.c !== r.c || (p.c === 'custom' && p.look && JSON.stringify(sanitizeLook(p.look)) !== r.lk))) { r.av.dispose(); NET.remote.delete(p.id); netUpsert(p); return; }
-  if (p.n && r.av.tag.firstChild && r.av.tag.firstChild.textContent !== p.n) r.av.tag.firstChild.textContent = String(p.n).slice(0, 16);
-  if (Array.isArray(p.fl) && p.fl.join(',') !== r.fl) { r.fl = p.fl.join(','); applyFlair(r.av.obj, p.fl); }
-  if (p.em && EMOTES.includes(p.em)) r.av.obj.userData.emote = p.em;
-  if (p.vip != null) r.av.tag.classList.toggle('vip', !!p.vip);
-  if (p.photo && p.photo !== r.photo && NET.http) { r.photo = p.photo; photoTexFromUrl(p.photo, NET.http + '/api/photo/' + p.photo).then(tx => { if (tx && NET.remote.get(p.id) === r) applyPhotoTex(r.av.obj, tx); }); }
-  if (p.x != null) { r.tx = p.x; r.tz = p.z; r.ry = p.ry || 0; r.st = p.st || 'idle'; }
+  if (!r) { r = { id: p.id, p: {}, av: null, tx: p.x || 0, tz: p.z || 20, ry: p.ry || 0, st: 'idle', seen: performance.now() }; NET.remote.set(p.id, r); }
+  const prev = r.p; r.p = { ...prev, ...p };
+  const lookOf = q => q.c === 'custom' ? JSON.stringify(sanitizeLook({ ...(q.look || {}), photo: '' })) : '';
+  if (r.av && ((p.c && p.c !== prev.c) || (p.look && lookOf(r.p) !== r.lk))) { r.av.dispose(); r.av = null; }   // changed character: rebuilt when next in view
+  if (r.av) remoteDress(r, p);
+  if (p.x != null) { r.tx = p.x; r.tz = p.z; r.ry = p.ry || 0; r.st = p.st || 'idle'; r.seen = performance.now(); }
+}
+function remoteBuild(r) {
+  const p = r.p, look = p.c === 'custom' ? sanitizeLook({ ...(p.look || {}), photo: '' }) : null;
+  const av = new Avatar(CHAR[p.c] && !CHAR[p.c].npc ? p.c : 'degen', { cls: 'npc', look }); av.tag.innerHTML = `<b>${esc(String(p.n || p.c || 'player').slice(0, 16))}</b>`;
+  av.obj.position.set(r.tx, 0, r.tz); av.obj.rotation.y = r.ry; r.av = av; r.lk = look ? JSON.stringify(look) : ''; r.fl = ''; r.photo = ''; r.shadow = undefined;
+  remoteDress(r, p);
+}
+function remoteDress(r, p) {   // name, flair, emote, VIP, photo face: everything that can change after the model exists
+  const av = r.av;
+  if (p.n && av.tag.firstChild && av.tag.firstChild.textContent !== p.n) av.tag.firstChild.textContent = String(p.n).slice(0, 16);
+  if (Array.isArray(p.fl) && p.fl.join(',') !== r.fl) { r.fl = p.fl.join(','); applyFlair(av.obj, p.fl); }
+  if (p.em && EMOTES.includes(p.em)) av.obj.userData.emote = p.em;
+  if (p.vip != null) av.tag.classList.toggle('vip', !!p.vip);
+  if (p.photo && p.photo !== r.photo && NET.http) { r.photo = p.photo; photoTexFromUrl(p.photo, NET.http + '/api/photo/' + p.photo).then(tx => { if (tx && r.av === av) applyPhotoTex(av.obj, tx); }); }
 }
 function netSeatAgent(ag) {
   if (!ag || !ag.sym || !ag.mint || agents.some(a => a.mint === ag.mint)) return null;   // only coins that really exist on pump.fun
@@ -75,22 +91,32 @@ function netSeatAgent(ag) {
   agents.push(a); seatAgent(a, b); return a;
 }
 function netTick(dt) {
-  /* crowd control, twice a second: only the nearest players are drawn (36 on desktop, 18 on phones), only the close ones cast shadows.
-     A full room of 100 stays smooth because the far ones simply wait their turn. */
-  const MAXV = TOUCH ? 18 : 36;
-  if (NET.remote.size && player && performance.now() - (NET.cullAt || 0) > 500) {
-    NET.cullAt = performance.now(); const pp = player.obj.position;
-    const arr = [...NET.remote.values()].map(r => ({ r, d: Math.hypot(r.tx - pp.x, r.tz - pp.z) })).sort((a, b) => a.d - b.d);
-    arr.forEach((o, i) => { const vis = i < MAXV && o.d < 60, sh = vis && o.d < 16 && i < 12; o.r.av.obj.visible = vis; o.r.av.tag.hidden = !vis; if (o.r.shadow !== sh) { o.r.shadow = sh; o.r.av.obj.traverse(m => { if (!m.isMesh) return; if (m.userData.sh === undefined) m.userData.sh = m.castShadow; m.castShadow = sh && m.userData.sh; }); } });
+  /* crowd control, twice a second: only the nearest players are drawn (36 on desktop, 18 on phones), only the close ones cast
+     shadows, players the server stopped updating (out of range) are hidden, and models out of sight for a minute are freed */
+  const MAXV = TOUCH ? 18 : 36, now = performance.now();
+  if (NET.remote.size && player && now - (NET.cullAt || 0) > 500) {
+    NET.cullAt = now; const pp = player.obj.position;
+    const arr = [...NET.remote.values()].map(r => ({ r, d: now - r.seen > 4000 ? Infinity : Math.hypot(r.tx - pp.x, r.tz - pp.z) })).sort((a, b) => a.d - b.d);
+    NET.wantBuild = [];
+    arr.forEach((o, i) => {
+      const r = o.r, vis = i < MAXV && o.d < 60, sh = vis && o.d < 16 && i < 12;
+      if (vis) r.lastVis = now;
+      if (!r.av) { if (vis) NET.wantBuild.push(r); return; }
+      if (!vis && now - (r.lastVis || 0) > 60e3) { r.av.dispose(); r.av = null; return; }
+      r.av.obj.visible = vis; r.av.tag.hidden = !vis;
+      if (r.shadow !== sh) { r.shadow = sh; r.av.obj.traverse(m => { if (!m.isMesh) return; if (m.userData.sh === undefined) m.userData.sh = m.castShadow; m.castShadow = sh && m.userData.sh; }); }
+    });
   }
+  if (NET.wantBuild && NET.wantBuild.length) for (let k = 0; k < 3 && NET.wantBuild.length; k++) { const r = NET.wantBuild.shift(); if (!r.av && NET.remote.get(r.id) === r) { remoteBuild(r); r.shadow = undefined; NET.cullAt = 0; } }   // a few new models per frame, never a freeze
   for (const r of NET.remote.values()) {
+    if (!r.av) continue;
     const o = r.av.obj; const dx = r.tx - o.position.x, dz = r.tz - o.position.z; const d = Math.hypot(dx, dz);
     if (!o.visible) { o.position.set(r.tx, 0, r.tz); o.rotation.y = r.ry; continue; }   // hidden players just teleport along
     if (d > 10) o.position.set(r.tx, 0, r.tz); else { o.position.x += dx * Math.min(1, dt * 10); o.position.z += dz * Math.min(1, dt * 10); }
     o.rotation.y = lerpAngle(o.rotation.y, r.ry, dt * 10); r.av.state = d > 0.08 ? (r.st === 'run' ? 'run' : 'walk') : (r.st === 'jump' ? 'jump' : 'idle');
   }
   if (!NET.ready || !player || !playing) return;
-  const now = performance.now(); if (now - NET.lastSend < 200) return; NET.lastSend = now;
+  if (now - NET.lastSend < 200) return; NET.lastSend = now;
   const p = player.obj.position; const sig = p.x.toFixed(1) + '|' + p.z.toFixed(1) + '|' + player.obj.rotation.y.toFixed(1) + '|' + player.state; if (sig === NET.lastSig && now - NET.lastFull < 5000) return; NET.lastSig = sig; if (now - NET.lastFull >= 5000) NET.lastFull = now;
   netSend({ t: 'p', x: +p.x.toFixed(2), z: +p.z.toFixed(2), ry: +player.obj.rotation.y.toFixed(2), st: player.state });
 }
