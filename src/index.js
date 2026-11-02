@@ -59,7 +59,7 @@ export class Cafe extends DurableObject {
     this.PAYOUT_WALLET = (env.PAYOUT_WALLET || '6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw').trim(); this.RESERVE_SOL = +(env.RESERVE_SOL || 0.08);
     this.BOOST_FEE_SOL = +(env.BOOST_FEE_SOL ?? 0.1); this.BOOST_MIN = +(env.BOOST_MINUTES || 60); this.boosts = {};
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
-    this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
+    this.FEE_RECEIVER = this.OWNER_PUBKEY || this.PAYOUT_WALLET;   // payments land on the hot wallet, so every launch pays for its own creation; the sweep moves the rest out every 10 minutes this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
     this.PINATA_JWT = String(env.PINATA_JWT || '').trim();   // launches need it: pump.fun's own upload refuses requests from servers
     this.HIDE_MINTS = new Set(String(env.HIDE_MINTS || '').split(',').map(x => x.trim()).filter(Boolean));
