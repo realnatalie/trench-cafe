@@ -38,12 +38,7 @@ export default {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/og.png') return env.ASSETS.fetch(req);
-    if (url.pathname.startsWith('/internal/')) return new Response('not found', { status: 404 });
-    if (url.pathname === '/api/_diag_d75248f08e5d83a7f7') {   // TEMP: checks the pump.fun metadata upload from Cloudflare, removed right after
-      const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
-      const fd = new FormData(); fd.append('file', new Blob([png], { type: 'image/png' }), 'image.png'); fd.append('name', 'Trench Test'); fd.append('symbol', 'TTEST'); fd.append('description', 'test'); fd.append('showName', 'true');
-      const r = await fetch('https://pump.fun/api/ipfs', { method: 'POST', body: fd }); return new Response(r.status + ' ' + (await r.text()).slice(0, 400));
-    }   // only the scheduled job talks to the room's internal routes
+    if (url.pathname.startsWith('/internal/')) return new Response('not found', { status: 404 });   // only the scheduled job talks to the room's internal routes
     return env.CAFE.get(env.CAFE.idFromName('main')).fetch(req);
   },
   async scheduled(ev, env, ctx) {
@@ -66,6 +61,7 @@ export class Cafe extends DurableObject {
     this.LAUNCHES_PER_HOUR_PER_IP = +(env.LAUNCHES_PER_HOUR_PER_IP || 2); this.PHOTO_MAX = +(env.PHOTO_MAX_KB || 220) * 1024;
     this.FEE_RECEIVER = this.PAYOUT_WALLET || this.OWNER_PUBKEY; this.LIVE = !!this.OWNER;
     this.conn = new Connection(this.RPC, 'confirmed');
+    this.PINATA_JWT = String(env.PINATA_JWT || '').trim();   // launches need it: pump.fun's own upload refuses requests from servers
     this.HIDE_MINTS = new Set(String(env.HIDE_MINTS || '').split(',').map(x => x.trim()).filter(Boolean));
     this.extrasInit(env); this.arcadeInit(env); this.buybackInit(env);
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
@@ -98,12 +94,12 @@ export class Cafe extends DurableObject {
         const id = 'p' + (this.nextId++); const me = { id, c: 'degen', n: 'player', x: 0, z: 20, ry: 0, st: 'idle', ip };
         this.players.set(server, me); server.serializeAttachment(me);
         if (this.LIVE && !this.recoverStarted) { this.recoverStarted = true; this.ctx.waitUntil(this.finishPending().then(() => this.recoverOrphans())); }
-        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, boosts: this.liveBoosts(), cfg: { ...this.extrasCfg(), live: this.LIVE, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, boostFee: this.BOOST_FEE_SOL, boostMin: this.BOOST_MIN, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', vip: !!a.vip, plate: a.plate || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
+        server.send(JSON.stringify({ t: 'welcome', id, online: this.players.size, boosts: this.liveBoosts(), cfg: { ...this.extrasCfg(), live: this.LIVE, launchOk: this.LIVE && !!this.PINATA_JWT, launchFee: this.LAUNCH_FEE_SOL, vipFee: this.VIP_FEE_SOL, boostFee: this.BOOST_FEE_SOL, boostMin: this.BOOST_MIN, owner: this.FEE_RECEIVER, creator: this.OWNER_PUBKEY, rpc: this.RPC.includes('api-key') ? '' : this.RPC }, players: [...this.players.values()].filter(p => p.id !== id).map(p => this.pub(p)), agents: this.agents.filter(a => a.mint).slice(-60).map(a => ({ sym: a.sym, name: a.name, body: a.body, image: a.image, mint: a.mint, by: a.by, desc: a.desc, socials: a.socials, wallet: a.wallet || '', vip: !!a.vip, plate: a.plate || '', at: a.at })), px: this.PX, sol: this.SOL_USD, ohlc: this.OHLC, trades: Object.fromEntries(Object.entries(this.TRADES).slice(-60).map(([k, v]) => [k, v.slice(0, 30)])) }));
         this.broadcast({ t: 'online', online: this.players.size }, server);
         this.startLoop();
         return new Response(null, { status: 101, webSocket: client });
       }
-      if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, live: this.LIVE, owner: this.OWNER_PUBKEY, online: this.players.size, agents: this.agents.length, platform: 'cloudflare' });
+      if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, live: this.LIVE, launchOk: this.LIVE && !!this.PINATA_JWT, owner: this.OWNER_PUBKEY, online: this.players.size, agents: this.agents.length, platform: 'cloudflare' });
       if (req.method === 'GET' && url.pathname === '/api/agents') return json(200, this.agents.filter(a => a.mint).slice(-200));
       if (req.method === 'GET' && url.pathname.startsWith('/api/photo/')) {
         const id = url.pathname.slice(11); if (!/^[a-f0-9]{8,40}$/.test(id)) return new Response('', { status: 404 });
@@ -204,6 +200,7 @@ export class Cafe extends DurableObject {
         if (p.vip && this.agents.filter(a => a.mint && a.vip).length >= 8) return json(400, { error: 'all VIP desks are taken', code: 'vipfull' });
         // one paid fee = one coin. The same payment can be sent again any number of times: it never creates a second coin and never needs a second payment.
         const paySig = String(p.paymentSig || '').trim();
+        if (!this.PINATA_JWT && !(paySig && await this.ctx.storage.get('launch:' + paySig))) return json(503, { error: 'launches open in a moment', code: 'paused' });
         if (this.LAUNCH_FEE_SOL && !/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(paySig)) return json(402, { error: 'launch fee payment missing', code: 'pay_missing' });
         let key = paySig ? 'launch:' + paySig : null, rec = key ? await this.ctx.storage.get(key) : null;
         if (rec && rec.done) return json(200, { ok: true, mint: rec.mint, sig: rec.sig, again: true });
@@ -404,9 +401,26 @@ export class Cafe extends DurableObject {
     if (m) fd.append('file', new Blob([b64ToBytes(m[2])], { type: m[1] }), 'image.' + (m[1].split('/')[1] || 'png'));
     fd.append('name', name); fd.append('symbol', symbol); fd.append('description', description || ''); fd.append('showName', 'true');
     if (twitter) fd.append('twitter', twitter); if (telegram) fd.append('telegram', telegram); if (website) fd.append('website', website);
+    if (this.PINATA_JWT) return this.pinataMetadata({ name, symbol, description, file: m ? fd.get('file') : null, twitter, telegram, website });
     const r = await fetch('https://pump.fun/api/ipfs', { method: 'POST', body: fd });
     if (!r.ok) throw new Error('metadata upload failed: ' + r.status);
     const j = await r.json(); return j.metadataUri;
+  }
+  // the coin's picture and metadata pinned on IPFS through Pinata (PINATA_JWT secret); pump.fun reads any IPFS metadata link
+  async pinataMetadata({ name, symbol, description, file, twitter, telegram, website }) {
+    const auth = { authorization: 'Bearer ' + this.PINATA_JWT }, GW = 'https://ipfs.io/ipfs/';
+    let image = '';
+    if (file) {
+      const f = new FormData(); f.append('file', file); f.append('pinataMetadata', JSON.stringify({ name: symbol + '-image' }));
+      const r = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', { method: 'POST', headers: auth, body: f });
+      if (!r.ok) throw new Error('image upload failed: ' + r.status + ' ' + (await r.text()).slice(0, 120));
+      image = GW + (await r.json()).IpfsHash;
+    }
+    const meta = { name, symbol, description: description || '', image, showName: true, createdOn: 'https://pump.fun' };
+    if (twitter) meta.twitter = twitter; if (telegram) meta.telegram = telegram; if (website) meta.website = website;
+    const r = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ pinataContent: meta, pinataMetadata: { name: symbol + '-metadata' } }) });
+    if (!r.ok) throw new Error('metadata upload failed: ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    return GW + (await r.json()).IpfsHash;
   }
   // signs, sends and waits for confirmation over plain HTTP polling (no websockets, no 30 s blockhash timer that gives up while the transaction still lands)
   async signAndSend(txBytes, signers, waitMs = 45000) {

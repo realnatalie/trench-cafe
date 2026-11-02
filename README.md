@@ -108,6 +108,7 @@ Real launches need two secrets (never commit them):
 npx wrangler secret put OWNER_SECRET_KEY   # base58 key of a fresh hot wallet used by the server
 npx wrangler secret put RPC_URL            # a mainnet RPC URL, e.g. Helius
 npx wrangler secret put BUYBACK_SECRET_KEY # optional: a separate wallet used only by the buyback robot
+npx wrangler secret put PINATA_JWT         # a Pinata API key (JWT): coin pictures and metadata are pinned on IPFS with it
 ```
 
 Check `https://<your-site>/api/health` for `"live": true`. For local runs, copy `.dev.vars.example` to `.dev.vars`.
