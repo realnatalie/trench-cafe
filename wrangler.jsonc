@@ -27,6 +27,7 @@
     "PHOTO_MAX_KB": "220",
     "BUYBACK_WALLET": "6tmPnY3uPsYXCebBGvSDN3SnRdQvpoeboKzfE9jfUwP3",
     "BUYBACK_MINT": "",
+    "MAIN_TICKER": "",
     "BUYBACK_SHARE": "0.5",
     "BUYBACK_MODE": "burn",
     "BUYBACK_FROM": "all",

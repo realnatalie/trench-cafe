@@ -1237,6 +1237,10 @@ body.gui .hints{bottom:calc(env(safe-area-inset-bottom,0px) + 84px);font-size:11
 .l2-live i{width:8px;height:8px;border-radius:50%;background:#6ff0b0;box-shadow:0 0 0 0 rgba(111,240,176,.7);animation:l2ping 1.8s infinite}
 .l2-live em{font-style:normal;opacity:.4}.l2-live b{color:#fff}
 @keyframes l2ping{70%{box-shadow:0 0 0 10px rgba(111,240,176,0)}100%{box-shadow:0 0 0 0 rgba(111,240,176,0)}}
+.l2-ca{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:fit-content;max-width:100%;padding:8px 10px 8px 14px;border-radius:12px;background:rgba(200,169,106,.1);border:1px solid rgba(200,169,106,.45);font:600 12px var(--f-mono);color:#ece9e2}
+.l2-ca b{color:#e9cf8f;letter-spacing:.12em}.l2-ca code{font:600 12px var(--f-mono);word-break:break-all;color:#ece9e2}
+.l2-ca button,.l2-ca a{font:700 11px var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:#0a0a0b;background:#e9cf8f;border:0;border-radius:7px;padding:7px 10px;text-decoration:none;cursor:pointer}
+.l2-ca a{background:transparent;color:#e9cf8f;border:1px solid rgba(200,169,106,.45)}
 .l2-kick{margin:0;font:800 13px var(--f-mono);letter-spacing:.3em;color:#ffcf5a}
 .l2-h1{margin:0;display:grid;gap:.02em;font:900 clamp(40px,6.4vw,92px)/.95 var(--f-display);letter-spacing:-.035em;color:#fff}
 .l2-h1 span{display:block;opacity:0;transform:translateY(18px);animation:l2in .8s cubic-bezier(.2,.8,.2,1) forwards}
@@ -1441,6 +1445,7 @@ button.wk-nm[data-agent]{cursor:pointer}button.wk-nm[data-agent]:hover{color:var
     <button type="button" data-open="char" data-i="nav_char">Character</button>
     <button type="button" data-open="shop" data-i="nav_shop">Shop</button>
     <button type="button" data-open="feed" class="nav-feed" data-i="tab_feed">Feed</button>
+    <button type="button" id="caBtn" hidden>CA</button>
     <button type="button" id="xBtn" aria-label="Trench Cafe on X">X ↗</button>
     <button type="button" class="lang" id="langBtn">EN</button>
   </nav>
@@ -1497,6 +1502,7 @@ button.wk-nm[data-agent]{cursor:pointer}button.wk-nm[data-agent]:hover{color:var
     <div class="land-hero l2" id="landHero">
       <div class="l2-left">
         <div class="l2-live"><i></i><span data-i="l2_live">LIVE ON SOLANA</span><em>·</em><b id="landN">1</b><span data-i="st_online">online</span></div>
+        <div class="l2-ca" id="landCA" hidden></div>
         <p class="l2-kick" data-i="land_h1a">GM, DEGEN.</p>
         <h1 class="l2-h1"><span data-i="l2_h1a">Launch a coin.</span><span data-i="l2_h1b">Pull up a chair.</span><span class="grad" data-i="l2_h1c">Ride the chart.</span></h1>
         <p class="l2-sub" data-i="land_sub"></p>
