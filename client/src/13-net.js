@@ -26,7 +26,7 @@ function netHandle(m) {
       if (m.trades) for (const k in m.trades) (m.trades[k] || []).slice().reverse().forEach(tx => onTrade(tx, false));
       onPrices(m.px || {}); rebuildFeed();
       if (!featured) { const last = agents.filter(a => a.mint).sort((p, q) => q.at - p.at)[0]; if (last) setFeatured(last, false); }
-      booths.forEach(drawScreen); drawWorldScreens(time); if (!$('#land').hidden) renderLand(); setTimeout(retryPendingVip, 2000); break;
+      booths.forEach(b => drawScreen(b, true)); drawWorldScreens(time); if (!$('#land').hidden) renderLand(); setTimeout(retryPendingVip, 2000); break;
     }
     case 'ps': (m.list || []).forEach(netUpsert); if (m.online) NET.online = m.online; break;
     case 'pc': {   // compact positions of the players near you: [id number, x*10, z*10, ry*100, state]

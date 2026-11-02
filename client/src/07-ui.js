@@ -43,7 +43,7 @@ function applyI18n() {
   if (TOUCH) { $('#hints').textContent = t('hints_touch'); $('#chatInput').placeholder = t('chat_ph').replace(/\s*[(（][^)）]*[)）]\s*$/, ''); }
   $('#langBtn').textContent = LANG_NAMES[LANG] || LANG.toUpperCase(); $('#landLang').value = LANG; if (!$('#land').hidden) renderLand();
   if (player) { const y = player.tag.querySelector('.you'); if (y) y.textContent = t('you'); }
-  agents.forEach(updateAgentTag); booths.forEach(drawScreen); drawWalletChip(); drawWorldScreens(0);
+  agents.forEach(updateAgentTag); booths.forEach(b => drawScreen(b, true)); drawWalletChip(); drawWorldScreens(0);
   feedDirty = true; renderSide(true); renderSelect();
   if (!$('#mHow').hidden) openHow();
   if (!$('#mBooth').hidden && openAgent) openBooth(openAgent);
@@ -423,6 +423,8 @@ function wireTrade(a) {
   const box = $('#tradeBox'); if (!box) return;
   const run = async (action, amount) => {
     if (!NET.http) { toast(t('tr_need_server')); return; }
+    if (NET.wallet && action === 'buy') { await refreshSol(); if (NET.solBal != null && amount + 0.004 > NET.solBal) { toast(t('tr_low', { n: NET.solBal.toFixed(3) })); return; } }   // Phantom would only say it failed to simulate
+    if (NET.wallet && action === 'sell') { const n = await tokenBalance(a.mint); if (!(n > 0)) { toast(t('tr_no_bag', { s: '$' + a.sym })); return; } }
     const btns = box.querySelectorAll('button'); btns.forEach(b => b.disabled = true); toast(t('tr_sending'), 'cyan');
     try { const sig = await tradeToken(a.mint, action, amount); toast(t('tr_done', { s: sig.slice(0, 8) + '…' }), 'gold'); confetti(_w.copy(player.obj.position).setY(1.5), 50); }
     catch (e) { toast(t('tr_fail', { e: String(e.message || e).slice(0, 90) })); }
@@ -918,7 +920,7 @@ function frame() {
 document.body.classList.add('starting');
 Promise.all([loadFaces(), loadLocalPhoto()]).then(() => {
   applyI18n(); drawWorldScreens(0);
-  document.fonts && document.fonts.ready.then(() => { redrawOnFonts.forEach(tx => tx.userData.redraw()); booths.forEach(drawScreen); });
+  document.fonts && document.fonts.ready.then(() => { redrawOnFonts.forEach(tx => tx.userData.redraw()); booths.forEach(b => drawScreen(b, true)); });
   requestAnimationFrame(frame);
   runLand();
   let shown = 0;

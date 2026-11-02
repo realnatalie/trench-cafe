@@ -73,6 +73,7 @@ export class Cafe extends DurableObject {
       const ag = await st.list({ prefix: 'a:' }); this.agents = [...ag.values()].sort((a, b) => a.at - b.at);
       for (const a of this.agents.filter(a => this.HIDE_MINTS.has(a.mint))) await st.delete('a:' + String(a.at).padStart(14, '0'));   // test coins taken off the floor
       this.agents = this.agents.filter(a => !this.HIDE_MINTS.has(a.mint));
+      for (const a of this.agents) if (a.mint && a.image && String(a.image).startsWith('data:')) { a.image = await this.coinImage(a.mint, a.image); await st.put('a:' + String(a.at).padStart(14, '0'), a); }
       this.sessions = (await st.get('sessions')) || {}; this.vips = (await st.get('vips')) || {}; this.boosts = (await st.get('boosts')) || {}; await this.extrasLoad(); await this.leagueLoad();
       if (this.HIDE_MINTS.size) { let ch = false; for (const m of this.HIDE_MINTS) { if (this.LG && this.LG.coins && this.LG.coins[m]) { delete this.LG.coins[m]; ch = true; } if (this.boosts[m]) { delete this.boosts[m]; await st.put('boosts', this.boosts); } } if (ch) await st.put('league:cur', this.LG); }
       const su = await st.get('solusd'); if (su && su.usd > 0 && Date.now() - su.at < 6 * 3600e3) this.SOL_USD = su.usd;   // the last known SOL price survives a restart
@@ -101,6 +102,11 @@ export class Cafe extends DurableObject {
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, live: this.LIVE, launchOk: this.LIVE && !!this.PINATA_JWT, owner: this.OWNER_PUBKEY, online: this.players.size, agents: this.agents.length, platform: 'cloudflare' });
       if (req.method === 'GET' && url.pathname === '/api/agents') return json(200, this.agents.filter(a => a.mint).slice(-200));
+      if (req.method === 'GET' && url.pathname.startsWith('/api/coinimg/')) {
+        const mint = url.pathname.slice(13); if (!/^[1-9A-HJ-NP-Za-km-z]{30,50}$/.test(mint)) return new Response('', { status: 404 });
+        const d = await this.ctx.storage.get('cimg:' + mint); const m = d && /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(d); if (!m) return new Response('', { status: 404 });
+        return new Response(b64ToBytes(m[2]), { headers: { 'content-type': m[1], 'cache-control': 'public, max-age=604800, immutable', ...CORS } });
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/photo/')) {
         const id = url.pathname.slice(11); if (!/^[a-f0-9]{8,40}$/.test(id)) return new Response('', { status: 404 });
         const ph = await this.ctx.storage.get('photo:' + id); if (!ph) return new Response('', { status: 404 });
@@ -466,10 +472,15 @@ export class Cafe extends DurableObject {
       return await this.commitLaunch(key, rec);
     } finally { this.launchBusy.delete(key); }
   }
+  // a coin picture sent as a data URL is kept in storage and served from /api/coinimg/<mint>: the room's coin list stays small for every player who walks in
+  async coinImage(mint, img) {
+    if (!img || !String(img).startsWith('data:')) return img || null;
+    await this.ctx.storage.put('cimg:' + mint, img); return '/api/coinimg/' + mint;
+  }
   async commitLaunch(key, rec) {
     if (!this.agents.some(a => a.mint === rec.mint)) {
       const m = rec.meta || {};
-      const agent = { sym: m.symbol, name: m.name || m.symbol, socials: { x: m.twitter || '', tg: m.telegram || '', web: m.website || '' }, body: rec.body || 'degen', image: rec.image || null, desc: m.description || '', by: rec.by || '', wallet: rec.wallet || '', vip: !!rec.vip, mint: rec.mint, sig: rec.sig || null, at: Date.now() };
+      const agent = { sym: m.symbol, name: m.name || m.symbol, socials: { x: m.twitter || '', tg: m.telegram || '', web: m.website || '' }, body: rec.body || 'degen', image: await this.coinImage(rec.mint, rec.image), desc: m.description || '', by: rec.by || '', wallet: rec.wallet || '', vip: !!rec.vip, mint: rec.mint, sig: rec.sig || null, at: Date.now() };
       this.agents.push(agent); await this.ctx.storage.put('a:' + String(agent.at).padStart(14, '0'), agent);
       if (this.agents.length > 500) { const old = this.agents.shift(); await this.ctx.storage.delete('a:' + String(old.at).padStart(14, '0')); }
       this.ctx.waitUntil(this.ppConnect()); this.ctx.waitUntil(new Promise(r => setTimeout(r, 15000)).then(() => this.pollPrices()));

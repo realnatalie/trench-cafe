@@ -275,7 +275,7 @@ function toast(msg, cls = '', force = false) {
 /* ================= world setup ================= */
 buildRoom(); buildTown(); buildExtras(); buildEasterEggs(); buildStage();
 BOOTH_Z.forEach((z, ri) => BOOTH_X.forEach((x, ci) => buildBooth(ri * 8 + ci + 1, x, z)));
-booths.forEach(drawScreen);
+booths.forEach(b => drawScreen(b, true));
 
 /* NPC wanderers */
 const LANES_Z = [-15.5, -10.2, -5.2, -0.2, 5.4, 9, 12.5];

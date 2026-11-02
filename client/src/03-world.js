@@ -443,8 +443,12 @@ function applyBoothStage(b) {
 const IMG_CACHE = {};
 function imgOf(a) { const src = a.image || THUMBS[a.body]; if (!src) return null; let im = IMG_CACHE[src]; if (!im) { im = new Image(); if (!src.startsWith('data:')) im.crossOrigin = 'anonymous'; im.src = src; IMG_CACHE[src] = im; } return im.complete && im.naturalWidth ? im : null; }
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function drawScreen(b) {
+function drawScreen(b, force) {
   const ctx = b.ctx, a = b.agent, W = 256, H = 160;
+  const tr = a && a.trades, oh = a && a.mint && typeof OHLC !== 'undefined' ? OHLC[a.mint] : null;
+  const sig = a ? [a.sym, a.mint, a.mcSol, a.bond, a.bonded, a.outside, a.plate, tr ? tr.length : 0, tr && tr[0] ? tr[0].sig || tr[0].ts : '', oh ? oh.length : 0, oh && oh.length ? oh[oh.length - 1][4] : '', typeof PX !== 'undefined' && PX[a.mint] ? PX[a.mint].mc : ''].join('|') : 'free|' + b.vip;
+  if (!force && b.scrSig === sig) return;   // the texture upload is the expensive part: skip it when nothing on the screen changed
+  b.scrSig = sig;
   ctx.fillStyle = '#07070f'; ctx.fillRect(0, 0, W, H);
   if (!a) {
     ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.setLineDash([6, 6]); ctx.strokeRect(10, 10, W - 20, H - 20); ctx.setLineDash([]);
