@@ -936,9 +936,10 @@ const xBtn = document.getElementById('xBtn'); if (xBtn) xBtn.addEventListener('c
 /* the project's own coin: its CA on the landing and a copy button in the game menu, shown once the server knows the mint */
 function renderMainCA() {
   const m = NET.cfg && NET.cfg.mainMint, tk = NET.cfg && NET.cfg.mainTicker, el = $('#landCA'), cb = $('#caBtn');
-  if (cb) { cb.hidden = !m; cb.textContent = (tk ? '$' + tk + ' ' : '') + 'CA'; }
+  const tl = tk ? (/\s/.test(tk) ? tk : '$' + tk) : '';
+  if (cb) { cb.hidden = !m; cb.textContent = (tl ? tl + ' ' : '') + 'CA'; }
   if (!el) return; el.hidden = !m; if (!m) return;
-  el.innerHTML = `<b>${tk ? '$' + esc(tk) + ' ' : ''}CA</b><code>${esc(m)}</code><button type="button" data-ca-copy>${t('ca_copy')}</button><a href="https://pump.fun/coin/${esc(m)}" target="_blank" rel="noopener">pump.fun ↗</a>`;
+  el.innerHTML = `<b>${tl ? esc(tl) + ' ' : ''}CA</b><code>${esc(m)}</code><button type="button" data-ca-copy>${t('ca_copy')}</button><a href="https://pump.fun/coin/${esc(m)}" target="_blank" rel="noopener">pump.fun ↗</a>`;
 }
 function copyMainCA(btn) { const m = NET.cfg && NET.cfg.mainMint; if (!m) return; try { navigator.clipboard && navigator.clipboard.writeText(m); } catch (e) { } toast(t('ca_copied'), 'gold'); if (btn && btn.dataset.caCopy !== undefined) { btn.textContent = t('ca_copied'); setTimeout(() => { btn.textContent = t('ca_copy'); }, 1500); } }
 document.addEventListener('click', e => { const b = e.target.closest('[data-ca-copy]'); if (b) copyMainCA(b); });

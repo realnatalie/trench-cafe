@@ -64,7 +64,7 @@ export class Cafe extends DurableObject {
     this.FEE_RECEIVER = this.OWNER_PUBKEY || this.PAYOUT_WALLET;   // payments land on the hot wallet, so every launch pays for its own creation; the sweep moves the rest out every 10 minutes
     this.conn = new Connection(this.RPC, 'confirmed');
     this.PINATA_JWT = String(env.PINATA_JWT || '').trim();
-    this.MAIN_TICKER = String(env.MAIN_TICKER || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);   // the project's own coin, shown with its CA on the site   // launches need it: pump.fun's own upload refuses requests from servers
+    this.MAIN_TICKER = String(env.MAIN_TICKER || '').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 20);   // the project's own coin, shown with its CA on the site   // launches need it: pump.fun's own upload refuses requests from servers
     this.HIDE_MINTS = new Set(String(env.HIDE_MINTS || '').split(',').map(x => x.trim()).filter(Boolean));
     this.extrasInit(env); this.arcadeInit(env); this.buybackInit(env);
     this.agents = []; this.sessions = {}; this.vips = {}; this.profiles = new Map();
