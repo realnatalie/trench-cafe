@@ -619,7 +619,8 @@ async function submitLaunch() {
   if (!paid && agents.some(a => a.booth && a.sym === name)) { $('#fErr').textContent = t('err_taken'); return; }
   if (!draft.agree) { $('#fErr').textContent = t('wz_err_agree'); return; }
   if (NET.http && !NET.ready) { $('#fErr').textContent = t('wz_wait_net'); return; }
-  if (NET.http && NET.cfg.live && NET.cfg.launchOk === false && !paid) { $('#fErr').textContent = t('wz_paused'); return; }   // never take a fee while the server cannot create coins
+  if (NET.http && NET.cfg.live && NET.cfg.launchOk === false && !paid) { $('#fErr').textContent = t('wz_paused'); return; }
+  if (NET.http && NET.cfg.live && !paid) { try { const h = await (await fetch(NET.http + '/api/health')).json(); if (h.launchOk === false) { $('#fErr').textContent = t('wz_paused'); return; } } catch (e) { } }   // checked right before the fee, so nobody pays while the server cannot create the coin   // never take a fee while the server cannot create coins
   const live = !!(NET.http && NET.cfg.live), btn = $('#fSubmit'); btn.disabled = true; $('#fErr').textContent = '';
   const steps = 2 + (live && NET.cfg.launchFee ? 1 : 0) + (live && draft.firstBuy > 0 ? 1 : 0); let st = 0, mint = null;
   if (live) {

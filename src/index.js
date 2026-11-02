@@ -30,6 +30,7 @@ function bytesToB64(bytes) { let s = ''; const u = new Uint8Array(bytes); for (l
 /* a coin image is accepted only as an inline PNG/JPEG/WebP data URL of a sane size or an https link on a known image host; anything else is dropped */
 const IMG_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(ipfs\.io|mypinata\.cloud|pinata\.cloud|pump\.fun|dweb\.link|nftstorage\.link|arweave\.net|irys\.xyz)\/[A-Za-z0-9._~\/?=&%-]{1,300}$/i;
 const safeImage = v => typeof v === 'string' && (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]{1,260000}$/.test(v) || IMG_HOSTS.test(v)) ? v : null;
+const MIN_HOT_SOL = 0.03;   // enough for a few coin creations at once
 const loginMsg = (wallet, nonce) => `Trench Cafe sign-in\nwallet: ${wallet}\nnonce: ${nonce}`;
 
 /* ---------- the Worker: page from assets, everything else to the room ---------- */
@@ -83,6 +84,12 @@ export class Cafe extends DurableObject {
     if (this.players.size) this.startLoop();
   }
   log(...a) { console.log(...a); }
+  // the hot wallet pays for creating each coin: below this the site stops taking launch fees instead of failing after payment
+  async hotWalletOk() {
+    if (!this.OWNER) return false;
+    if (Date.now() - (this.hotAt || 0) > 30e3) { this.hotAt = Date.now(); try { this.hotBal = (await this.conn.getBalance(this.OWNER.publicKey)) / 1e9; } catch (e) { } }
+    return this.hotBal == null || this.hotBal >= MIN_HOT_SOL;
+  }
 
   /* ---- http ---- */
   async fetch(req) {
@@ -101,7 +108,7 @@ export class Cafe extends DurableObject {
         this.startLoop();
         return new Response(null, { status: 101, webSocket: client });
       }
-      if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, live: this.LIVE, launchOk: this.LIVE && !!this.PINATA_JWT, owner: this.OWNER_PUBKEY, online: this.players.size, agents: this.agents.length, platform: 'cloudflare' });
+      if (req.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, live: this.LIVE, launchOk: this.LIVE && !!this.PINATA_JWT && await this.hotWalletOk(), owner: this.OWNER_PUBKEY, online: this.players.size, agents: this.agents.length, platform: 'cloudflare' });
       if (req.method === 'GET' && url.pathname === '/api/agents') return json(200, this.agents.filter(a => a.mint).slice(-200));
       if (req.method === 'GET' && url.pathname.startsWith('/api/coinimg/')) {
         const mint = url.pathname.slice(13); if (!/^[1-9A-HJ-NP-Za-km-z]{30,50}$/.test(mint)) return new Response('', { status: 404 });

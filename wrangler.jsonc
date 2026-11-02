@@ -22,7 +22,7 @@
     "CHIP_PACKS": "[{\"usd\":10,\"chips\":5000},{\"usd\":25,\"chips\":13500},{\"usd\":50,\"chips\":30000}]",
     "DEV_BUY_SOL": "0",
     "PAYOUT_WALLET": "6pMq3PeTRoR28YMk19Fbr1eJKeuRtMRAvQLWwQdQFEMw",
-    "RESERVE_SOL": "0.15",
+    "RESERVE_SOL": "0.5",
     "LAUNCHES_PER_HOUR_PER_IP": "2",
     "PHOTO_MAX_KB": "220",
     "BUYBACK_WALLET": "6tmPnY3uPsYXCebBGvSDN3SnRdQvpoeboKzfE9jfUwP3",
