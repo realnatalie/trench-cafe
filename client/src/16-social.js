@@ -191,7 +191,7 @@ document.addEventListener('click', async e => {
   if (e.target.closest('#shX')) {
     if (TOUCH && SH.file && navigator.canShare && navigator.canShare({ files: [SH.file] })) { try { await navigator.share({ files: [SH.file], text: text() + ' ' + SH.url }); return; } catch (err) { if (err && err.name === 'AbortError') return; } }
     const ok = SH.blob && await shCopyImg(); if (!ok) shDownload();
-    window.open('https://x.com/intent/post?text=' + encodeURIComponent(text()) + '&url=' + encodeURIComponent(SH.url), '_blank', 'noopener');
+    window.open('https://x.com/intent/post?text=' + encodeURIComponent(text()) + '&url=' + encodeURIComponent(SH.url) + '&via=TrenchCafeVip', '_blank', 'noopener');
     if (hint) { hint.textContent = ok ? t('sh_done_copy') : t('sh_done_save'); hint.classList.add('on'); }
     gainOnce('share', 30);
   }

@@ -75,6 +75,7 @@ const META = `<meta charset="utf-8">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@TrenchCafeVip">
 <meta name="twitter:title" content="Trench Cafe">
 <meta name="twitter:description" content="${DESCRIPTION}">
 <meta name="twitter:image" content="${SITE_URL}/og.png">

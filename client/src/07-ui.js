@@ -662,7 +662,7 @@ async function submitLaunch() {
   const b = a.booth; if (b) confetti(_w.set(b.x, 1.4, b.z + 1), 60);
   $('#launchBody').innerHTML = `<div class="wz-done"><div class="land-chip">${mint ? t('wz_done') : t('wz_done_test')}</div><h3>$${esc(name)} · ${esc(a.title)}</h3>${pfCard()}
     ${mint ? `<div class="wz-ca"><span class="lab">${t('wz_ca')}</span><code>${esc(mint)}</code><button type="button" class="btn small" id="wzCopy">${t('wz_copy')}</button></div><div class="ca"><a href="https://pump.fun/coin/${esc(mint)}" target="_blank" rel="noopener">pump.fun ↗</a> · <a href="https://dexscreener.com/solana/${esc(mint)}" target="_blank" rel="noopener">dexscreener ↗</a> · <a href="https://solscan.io/token/${esc(mint)}" target="_blank" rel="noopener">solscan ↗</a></div>` : `<div class="note-box">${NET.http ? t('wz_soon_note') : t('wz_sim_note')}</div>`}
-    <div class="row">${mint ? `<a class="btn hot" href="https://x.com/intent/post?text=${encodeURIComponent(`$${name} just launched at Trench Cafe. CA: ${mint} · https://pump.fun/coin/${mint}`)}" target="_blank" rel="noopener">${t('wz_share')}</a>` : ''}<button type="button" class="btn" id="wzGo">${t('wz_goto')}</button></div></div>`;
+    <div class="row">${mint ? `<a class="btn hot" href="https://x.com/intent/post?text=${encodeURIComponent(`$${name} just launched at Trench Cafe. CA: ${mint} · https://pump.fun/coin/${mint}`)}&via=TrenchCafeVip" target="_blank" rel="noopener">${t('wz_share')}</a>` : ''}<button type="button" class="btn" id="wzGo">${t('wz_goto')}</button></div></div>`;
   const cp = $('#wzCopy'); if (cp) cp.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(mint); cp.textContent = t('wz_copied'); });
   $('#wzGo').addEventListener('click', () => { closeModals(); if (player && b) { player.obj.position.set(b.x, 0, b.z + 2.7); player.obj.rotation.y = Math.PI; moveTarget = null; autoWalk = null; cam.yaw = 0; snapCamera(); } });
   toast(mint ? t('launched_real', { s: '$' + name }) : t('launched_test', { s: '$' + name }), mint ? 'gold' : 'cyan', true);
@@ -929,3 +929,5 @@ Promise.all([loadFaces(), loadLocalPhoto()]).then(() => {
     setTimeout(() => { try { camera.position.set(STAGE.x, 1.9, STAGE.z + 5.6); camera.lookAt(STAGE.x, 1.05, STAGE.z); renderer.compileAsync ? renderer.compileAsync(scene, camera).catch(() => { }) : renderer.compile(scene, camera); } catch (e) { } }, 200);   // warm up shaders while the landing is read
   }), 150);
 });
+
+const xBtn = document.getElementById('xBtn'); if (xBtn) xBtn.addEventListener('click', () => window.open('https://x.com/TrenchCafeVip', '_blank', 'noopener'));

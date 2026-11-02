@@ -132,6 +132,8 @@ body.starting .side,body.starting .hud,body.starting .hints,body.starting .side-
 .land-nav nav{display:flex;align-items:center;gap:2px}
 .land-nav nav button{font:600 11px var(--f-mono);letter-spacing:.18em;text-transform:uppercase;color:rgba(236,233,226,.7);background:transparent;border:0;padding:9px 10px;border-radius:6px}
 .land-nav nav button:hover{color:#ece9e2;background:rgba(236,233,226,.08)}
+.land-nav nav .land-x{font:600 11px var(--f-mono);letter-spacing:.18em;color:rgba(236,233,226,.7);text-decoration:none;padding:9px 10px;border-radius:6px}
+.land-nav nav .land-x:hover{color:#ece9e2;background:rgba(236,233,226,.08)}
 .land-nav nav .land-lang{border:1px solid rgba(236,233,226,.2);margin-left:6px;background:#0a0a0b;color:#ece9e2;font:600 11px var(--f-mono);letter-spacing:.14em;padding:9px 10px;border-radius:6px;appearance:none;-webkit-appearance:none;cursor:pointer}
 .land-nav nav .land-enter{background:#ece9e2;color:#0a0a0b;font-weight:700;margin-left:6px;padding:10px 14px}
 .land-nav nav .land-enter:hover{background:#ece9e2;color:#0a0a0b}
@@ -1439,6 +1441,7 @@ button.wk-nm[data-agent]{cursor:pointer}button.wk-nm[data-agent]:hover{color:var
     <button type="button" data-open="char" data-i="nav_char">Character</button>
     <button type="button" data-open="shop" data-i="nav_shop">Shop</button>
     <button type="button" data-open="feed" class="nav-feed" data-i="tab_feed">Feed</button>
+    <button type="button" id="xBtn" aria-label="Trench Cafe on X">X ↗</button>
     <button type="button" class="lang" id="langBtn">EN</button>
   </nav>
 </header>
@@ -1485,6 +1488,7 @@ button.wk-nm[data-agent]{cursor:pointer}button.wk-nm[data-agent]:hover{color:var
     <div class="land-brand"><span class="emb" id="landEmb"></span><b>TRENCH CAFE</b></div>
     <nav>
       <button type="button" data-land="how" data-i="land_how">HOW IT WORKS</button>
+      <a class="land-x" href="https://x.com/TrenchCafeVip" target="_blank" rel="noopener" aria-label="Trench Cafe on X">X ↗</a>
       <select class="land-lang" id="landLang" aria-label="Language"><option value="en">EN</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="es">ES</option></select>
       <button type="button" class="land-enter" data-land="enter" data-i="nav_enter">ENTER →</button>
     </nav>
