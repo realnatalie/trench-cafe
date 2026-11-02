@@ -96,7 +96,7 @@ function netTick(dt) {
   const MAXV = TOUCH ? 10 : 20, now = performance.now();
   if (NET.remote.size && player && now - (NET.cullAt || 0) > 500) {
     NET.cullAt = now; const pp = player.obj.position;
-    const arr = [...NET.remote.values()].map(r => ({ r, d: now - r.seen > 4000 ? Infinity : Math.hypot(r.tx - pp.x, r.tz - pp.z) })).sort((a, b) => a.d - b.d);
+    const arr = [...NET.remote.values()].map(r => ({ r, d: now - r.seen > 9000 ? Infinity : Math.hypot(r.tx - pp.x, r.tz - pp.z) })).sort((a, b) => a.d - b.d);
     NET.wantBuild = [];
     arr.forEach((o, i) => {
       const r = o.r, vis = i < MAXV && o.d < 60, sh = vis && o.d < 12 && i < 6;

@@ -349,7 +349,7 @@ export class Cafe extends DurableObject {
     if (!this.players.size) return this.stopLoop();
     this.psTick++;
     if (this.psTick % 25 === 0) this.pruneGhosts();
-    this.sendPositions(this.psTick % 25 === 0);
+    this.sendPositions(this.psTick % 10 === 0);   // everyone nearby, standing still or not, every 2 s: players are hidden only after 9 s of silence
     if (this.psTick % 3 === 0 && this.txQueue.length) { const l = this.txQueue.splice(0, 40); this.txQueue.length = 0; this.broadcast({ t: 'tx', list: l }); }
     if (this.psTick % 150 === 0) { this.pollPrices(); if (!this.ppWs && this.agents.some(a => a.mint)) this.ppConnect(); }
     if (this.psTick % 300 === 10) this.pollSol();
