@@ -863,16 +863,17 @@ function updateZone() {
 const AQ = { step: 0, slow: 0, fast: 0, last: 0 };
 function autoQuality() {
   const now = performance.now(), gap = now - AQ.last; AQ.last = now;
-  if (!playing || AQ.step >= 3 || document.hidden || gap > 1500 || !gap) return;   // a tab switch or a modal pause is not lag
-  if (gap > 38) { AQ.slow += Math.min(gap, 400); AQ.fast = 0; } else { AQ.fast += gap; if (AQ.fast > 2000) AQ.slow = 0; }
-  if (AQ.slow < 3000) return;
+  if (!playing || AQ.step >= 4 || document.hidden || gap > 1500 || !gap) return;   // a tab switch or a modal pause is not lag
+  if (gap > 30) { AQ.slow += Math.min(gap, 400); AQ.fast = 0; } else { AQ.fast += gap; if (AQ.fast > 2000) AQ.slow = 0; }
+  if (AQ.slow < 1500) return;
   AQ.slow = 0; AQ.step++;
-  if (AQ.step === 1) { renderer.setPixelRatio(1); composer.setPixelRatio(1); resize(); }
+  if (AQ.step === 1) { renderer.setPixelRatio(1); composer.setPixelRatio(1); if (smaa) smaa.enabled = false; resize(); }
   else if (AQ.step === 2) bloom.enabled = false;
   else if (AQ.step === 3) { renderer.shadowMap.enabled = false; sun.castShadow = false; scene.traverse(o => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); }); }
+  else if (AQ.step === 4) { renderer.setPixelRatio(0.75); composer.setPixelRatio(0.75); resize(); }
   PERF.quality = AQ.step;
 }
-function resize() { VW = innerWidth; VH = innerHeight; renderer.setSize(VW, VH, false); composer.setSize(VW, VH); bloom.setSize(VW, VH); if (smaa) smaa.setSize(VW, VH); camera.aspect = VW / VH; camera.updateProjectionMatrix(); }
+function resize() { VW = innerWidth; VH = innerHeight; renderer.setSize(VW, VH, false); composer.setSize(VW, VH); bloom.setSize(Math.round(VW / 2), Math.round(VH / 2)); if (smaa) smaa.setSize(VW, VH); camera.aspect = VW / VH; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 setInterval(() => renderSide(), 1000);
 setInterval(() => { if (openAgent) fillBooth(openAgent); }, 1500);

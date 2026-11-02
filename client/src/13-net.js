@@ -93,13 +93,13 @@ function netSeatAgent(ag) {
 function netTick(dt) {
   /* crowd control, twice a second: only the nearest players are drawn (36 on desktop, 18 on phones), only the close ones cast
      shadows, players the server stopped updating (out of range) are hidden, and models out of sight for a minute are freed */
-  const MAXV = TOUCH ? 18 : 36, now = performance.now();
+  const MAXV = TOUCH ? 10 : 20, now = performance.now();
   if (NET.remote.size && player && now - (NET.cullAt || 0) > 500) {
     NET.cullAt = now; const pp = player.obj.position;
     const arr = [...NET.remote.values()].map(r => ({ r, d: now - r.seen > 4000 ? Infinity : Math.hypot(r.tx - pp.x, r.tz - pp.z) })).sort((a, b) => a.d - b.d);
     NET.wantBuild = [];
     arr.forEach((o, i) => {
-      const r = o.r, vis = i < MAXV && o.d < 60, sh = vis && o.d < 16 && i < 12;
+      const r = o.r, vis = i < MAXV && o.d < 60, sh = vis && o.d < 12 && i < 6;
       if (vis) r.lastVis = now;
       if (!r.av) { if (vis) NET.wantBuild.push(r); return; }
       if (!vis && now - (r.lastVis || 0) > 60e3) { r.av.dispose(); r.av = null; return; }

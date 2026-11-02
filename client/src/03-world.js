@@ -140,9 +140,9 @@ function emoteAnim(av, u, time) {
 const canvas = $('#gl');
 const HQ = !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) && Math.min(innerWidth, innerHeight) > 520;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !HQ, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, HQ ? 1.5 : 1));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, HQ ? 1.25 : 1));
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = HQ; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = HQ; renderer.shadowMap.type = THREE.PCFShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x09090a);
 scene.fog = new THREE.Fog(0x09090a, 30, 66);
@@ -157,10 +157,10 @@ scene.fog = new THREE.Fog(0x09090a, 30, 66);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 260);
 scene.add(new THREE.HemisphereLight(0xd9d2c5, 0x1c1a18, 0.95));
 const sun = new THREE.DirectionalLight(0xfff0e0, 1.6); sun.position.set(6, 14, 10); scene.add(sun); scene.add(sun.target);
-sun.castShadow = HQ; sun.shadow.mapSize.set(2048, 2048); sun.shadow.camera.near = 1; sun.shadow.camera.far = 70; sun.shadow.camera.left = sun.shadow.camera.bottom = -24; sun.shadow.camera.right = sun.shadow.camera.top = 24; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03; sun.shadow.radius = 3;
+sun.castShadow = HQ; sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.near = 1; sun.shadow.camera.far = 70; sun.shadow.camera.left = sun.shadow.camera.bottom = -24; sun.shadow.camera.right = sun.shadow.camera.top = 24; sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03; sun.shadow.radius = 3;
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.22, 0.5, 0.92); if (HQ) composer.addPass(bloom);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.22, 0.5, 0.92); if (HQ) composer.addPass(bloom);
 composer.addPass(new OutputPass());
 /* finishing pass: a soft vignette, a touch of contrast and film grain, so the picture reads like a photo and not a flat render */
 const gradeShader = {
