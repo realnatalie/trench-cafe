@@ -1,6 +1,6 @@
 /* ================= SOCIAL: the bartender, cafe music, the invite pass, sharing to X, the weekly board =================
    All of it is game flavour: XP only, never chips or SOL. Music is synthesised live (no audio files, nothing licensed). */
-const SITE_FALLBACK = 'https://clout-cafe.fkamilev102.workers.dev';
+const SITE_FALLBACK = 'https://trenchcafe.com';
 const siteURL = () => String(NET.http || SITE_FALLBACK).replace(/\/$/, '');
 function myUid() {
   let u = store.get('cc_uid', '');

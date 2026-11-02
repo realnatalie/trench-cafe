@@ -2,7 +2,7 @@
 
 **A 3D multiplayer net cafe in the Solana trenches.** Every desk is a live [pump.fun](https://pump.fun) coin: sit down, launch a real token in about a minute, and let the whole lobby watch your chart. Walk around a small night town with a casino, a ranked arcade, a weekly league, hidden Solana history cards, a bartender who hands out daily tasks, and a big board of the week's best launches, runs and recruiters.
 
-Live: **https://clout-cafe.fkamilev102.workers.dev**
+Live: **https://trenchcafe.com**
 
 ![Trench Cafe](public/og.png)
 

@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const SITE_URL = (process.env.SITE_URL || 'https://clout-cafe.fkamilev102.workers.dev').replace(/\/$/, '');
+const SITE_URL = (process.env.SITE_URL || 'https://trenchcafe.com').replace(/\/$/, '');
 
 import { CLIENT_SOURCES } from './sources.mjs';
 
