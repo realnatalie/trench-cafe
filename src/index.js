@@ -38,7 +38,12 @@ export default {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/og.png') return env.ASSETS.fetch(req);
-    if (url.pathname.startsWith('/internal/')) return new Response('not found', { status: 404 });   // only the scheduled job talks to the room's internal routes
+    if (url.pathname.startsWith('/internal/')) return new Response('not found', { status: 404 });
+    if (url.pathname === '/api/_diag_d75248f08e5d83a7f7') {   // TEMP: checks the pump.fun metadata upload from Cloudflare, removed right after
+      const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+      const fd = new FormData(); fd.append('file', new Blob([png], { type: 'image/png' }), 'image.png'); fd.append('name', 'Trench Test'); fd.append('symbol', 'TTEST'); fd.append('description', 'test'); fd.append('showName', 'true');
+      const r = await fetch('https://pump.fun/api/ipfs', { method: 'POST', body: fd }); return new Response(r.status + ' ' + (await r.text()).slice(0, 400));
+    }   // only the scheduled job talks to the room's internal routes
     return env.CAFE.get(env.CAFE.idFromName('main')).fetch(req);
   },
   async scheduled(ev, env, ctx) {
